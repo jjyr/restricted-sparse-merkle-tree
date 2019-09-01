@@ -9,6 +9,7 @@ type H256 = [u8; 32];
 type TreeCache = HashMap<H256, (H256, H256)>;
 /// the default hash of leaves
 pub const ZERO_HASH: H256 = [0u8; 32];
+const LEAVES_SIZE: usize = std::mem::size_of::<H256>() * 8;
 
 lazy_static! {
     static ref DEFAULT_TREE: (H256, TreeCache) = compute_default_tree();
@@ -171,15 +172,17 @@ impl SparseMerkleTree {
 
 /// verify merkle proof
 pub fn verify_proof(proof: &[H256], root: &H256, key: &H256, value: &H256) -> bool {
+    if proof.len() != LEAVES_SIZE {
+        return false;
+    }
     let mut node = Cow::Borrowed(value);
-    let proof_len = proof.len();
     for (i, branch) in PathIter::from(key)
         .collect::<Vec<_>>()
         .into_iter()
         .rev()
         .enumerate()
     {
-        let sibling = match proof.get(proof_len - i - 1) {
+        let sibling = match proof.get(LEAVES_SIZE - i - 1) {
             Some(sibling) => sibling,
             None => {
                 return false;
