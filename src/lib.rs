@@ -7,7 +7,8 @@ use std::collections::HashMap;
 
 type H256 = [u8; 32];
 type TreeCache = HashMap<H256, (H256, H256)>;
-const ZERO_HASH: H256 = [0u8; 32];
+/// the default hash of leaves
+pub const ZERO_HASH: H256 = [0u8; 32];
 
 lazy_static! {
     static ref DEFAULT_TREE: (H256, TreeCache) = compute_default_tree();
@@ -60,6 +61,7 @@ impl<'a> Iterator for PathIter<'a> {
     }
 }
 
+/// merge two hash
 fn merge(lhs: &H256, rhs: &H256) -> H256 {
     let mut hash = [0u8; 32];
     let mut hasher = new_blake2b();
@@ -81,6 +83,7 @@ fn compute_default_tree() -> (H256, TreeCache) {
     (hash, cache)
 }
 
+/// Sparse merkle tree
 pub struct SparseMerkleTree {
     pub cache: TreeCache,
     pub root: H256,
@@ -93,11 +96,12 @@ impl Default for SparseMerkleTree {
 }
 
 impl SparseMerkleTree {
+    /// create a merkle tree from root and cache
     pub fn new(root: H256, cache: TreeCache) -> SparseMerkleTree {
         SparseMerkleTree { root, cache }
     }
 
-    /// update a key
+    /// update a leaf
     pub fn update(&mut self, key: &H256, value: H256) {
         let mut node = &self.root;
         let mut siblings = Vec::with_capacity(256);
@@ -133,7 +137,7 @@ impl SparseMerkleTree {
         self.root = node;
     }
 
-    /// get a value
+    /// get value of a leaf
     pub fn get(&mut self, key: &H256) -> &H256 {
         let mut node = &self.root;
         for branch in PathIter::from(key) {
@@ -165,6 +169,7 @@ impl SparseMerkleTree {
     }
 }
 
+/// verify merkle proof
 pub fn verify_proof(proof: &[H256], root: &H256, key: &H256, value: &H256) -> bool {
     let mut node = Cow::Borrowed(value);
     let proof_len = proof.len();
