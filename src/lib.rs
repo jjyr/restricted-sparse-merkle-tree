@@ -17,8 +17,8 @@ lazy_static! {
 }
 
 enum Branch {
-    Left,
-    Right,
+    Left = 0,
+    Right = 1,
 }
 
 /// Iterator H256 as a path
@@ -45,9 +45,9 @@ impl<'a> Iterator for PathIter<'a> {
         const HIGHEST_BIT: u8 = 7;
         if let Some(byte) = self.path.get(self.byte_pos as usize) {
             let branch = if (byte >> (HIGHEST_BIT - self.bit_pos)) & 1 == 1 {
-                Branch::Left
-            } else {
                 Branch::Right
+            } else {
+                Branch::Left
             };
             if self.bit_pos == HIGHEST_BIT {
                 self.byte_pos += 1;
