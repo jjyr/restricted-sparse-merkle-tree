@@ -2,6 +2,7 @@ mod blake2b;
 
 use crate::blake2b::new_blake2b;
 use lazy_static::lazy_static;
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 type H256 = [u8; 32];
@@ -164,6 +165,33 @@ impl SparseMerkleTree {
     }
 }
 
+pub fn verify_proof(proof: &[H256], root: &H256, key: &H256, value: &H256) -> bool {
+    let mut node = Cow::Borrowed(value);
+    let proof_len = proof.len();
+    for (i, branch) in PathIter::from(key)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .enumerate()
+    {
+        let sibling = match proof.get(proof_len - i - 1) {
+            Some(sibling) => sibling,
+            None => {
+                return false;
+            }
+        };
+        match branch {
+            Branch::Left => {
+                node = Cow::Owned(merge(node.as_ref(), sibling));
+            }
+            Branch::Right => {
+                node = Cow::Owned(merge(sibling, node.as_ref()));
+            }
+        }
+    }
+    root == node.as_ref()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,5 +216,26 @@ mod tests {
         let value = [7u8; 32];
         tree.update(&key, value);
         assert_eq!(tree.get(&key), &value);
+    }
+
+    #[test]
+    fn test_merkle_proof() {
+        let mut tree = SparseMerkleTree::default();
+        let mut key = [0u8; 32];
+        key[31] = 1;
+        let value = [7u8; 32];
+        tree.update(&key, value);
+        let proof = tree.gen_proof(&key);
+        assert!(verify_proof(&proof, &tree.root, &key, &value));
+    }
+
+    #[test]
+    fn test_merkle_proof_default() {
+        let mut tree = SparseMerkleTree::default();
+        let mut key = [0u8; 32];
+        key[31] = 1;
+        let value = tree.get(&key).clone();
+        let proof = tree.gen_proof(&key);
+        assert!(verify_proof(&proof, &tree.root, &key, &value));
     }
 }
