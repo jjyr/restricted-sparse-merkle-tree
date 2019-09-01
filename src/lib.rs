@@ -1,4 +1,4 @@
-mod blake2b;
+pub mod blake2b;
 
 use crate::blake2b::new_blake2b;
 use lazy_static::lazy_static;
@@ -200,6 +200,7 @@ pub fn verify_proof(proof: &[H256], root: &H256, key: &H256, value: &H256) -> bo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     #[test]
     fn test_default_root() {
         let tree = SparseMerkleTree::default();
@@ -213,34 +214,38 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_update() {
+    fn test_update(key: H256, value: H256) {
         let mut tree = SparseMerkleTree::default();
-        let mut key = [0u8; 32];
-        key[31] = 1;
-        let value = [7u8; 32];
         tree.update(&key, value);
         assert_eq!(tree.get(&key), &value);
     }
 
-    #[test]
-    fn test_merkle_proof() {
+    fn test_merkle_proof(key: H256, value: H256) {
         let mut tree = SparseMerkleTree::default();
-        let mut key = [0u8; 32];
-        key[31] = 1;
-        let value = [7u8; 32];
         tree.update(&key, value);
         let proof = tree.gen_proof(&key);
         assert!(verify_proof(&proof, &tree.root, &key, &value));
     }
 
-    #[test]
-    fn test_merkle_proof_default() {
+    fn test_merkle_proof_default(key: H256) {
         let mut tree = SparseMerkleTree::default();
-        let mut key = [0u8; 32];
-        key[31] = 1;
         let value = *tree.get(&key);
         let proof = tree.gen_proof(&key);
         assert!(verify_proof(&proof, &tree.root, &key, &value));
+    }
+
+    proptest! {
+        #[test]
+        fn test_random_update(key: H256, value: H256) {
+            test_update(key, value);
+        }
+        #[test]
+        fn test_random_merkle_proof(key: H256, value: H256) {
+            test_merkle_proof(key, value);
+        }
+        #[test]
+        fn test_random_merkle_proof_default(key: H256) {
+            test_merkle_proof_default(key);
+        }
     }
 }

@@ -10,3 +10,6 @@ license = "MIT"
 [dependencies]
 blake2b-rs = "0.1"
 lazy_static = "1.4"
+
+[dev-dependencies]
+proptest = "0.9"
