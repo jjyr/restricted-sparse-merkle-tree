@@ -71,7 +71,7 @@ fn merge(lhs: &H256, rhs: &H256) -> H256 {
 
 /// precompute default tree
 fn compute_default_tree() -> (H256, TreeCache) {
-    let mut hash = ZERO_HASH.clone();
+    let mut hash = ZERO_HASH;
     let mut cache: TreeCache = Default::default();
     for _ in 0..256 {
         let parent = merge(&hash, &hash);
@@ -105,11 +105,11 @@ impl SparseMerkleTree {
             let parent = &self.cache[node];
             match branch {
                 Branch::Left => {
-                    siblings.push(parent.1.clone());
+                    siblings.push(parent.1);
                     node = &parent.0;
                 }
                 Branch::Right => {
-                    siblings.push(parent.0.clone());
+                    siblings.push(parent.0);
                     node = &parent.1;
                 }
             }
@@ -120,12 +120,12 @@ impl SparseMerkleTree {
             match branch {
                 Branch::Left => {
                     let new_parent = merge(&node, &sibling);
-                    self.cache.insert(new_parent.clone(), (node, sibling));
+                    self.cache.insert(new_parent, (node, sibling));
                     node = new_parent;
                 }
                 Branch::Right => {
                     let new_parent = merge(&sibling, &node);
-                    self.cache.insert(new_parent.clone(), (sibling, node));
+                    self.cache.insert(new_parent, (sibling, node));
                     node = new_parent;
                 }
             }
@@ -152,11 +152,11 @@ impl SparseMerkleTree {
             let parent = &self.cache[node];
             match branch {
                 Branch::Left => {
-                    proof.push(parent.1.clone());
+                    proof.push(parent.1);
                     node = &parent.0;
                 }
                 Branch::Right => {
-                    proof.push(parent.0.clone());
+                    proof.push(parent.0);
                     node = &parent.1;
                 }
             }
@@ -234,7 +234,7 @@ mod tests {
         let mut tree = SparseMerkleTree::default();
         let mut key = [0u8; 32];
         key[31] = 1;
-        let value = tree.get(&key).clone();
+        let value = *tree.get(&key);
         let proof = tree.gen_proof(&key);
         assert!(verify_proof(&proof, &tree.root, &key, &value));
     }
