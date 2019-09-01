@@ -1,9 +1,11 @@
 [package]
 name = "sparse-merkle-tree"
-version = "0.1.0"
+version = "0.1.0-alpha1"
 authors = ["jjy <jjyruby@gmail.com>"]
 edition = "2018"
 license = "MIT"
+repository = "https://github.com/jjyr/sparse-merkle-tree"
+description = "Sparse merkle tree implement in rust"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
