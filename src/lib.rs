@@ -7,7 +7,7 @@ use lazy_static::lazy_static;
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-type H256 = [u8; 32];
+pub type H256 = [u8; 32];
 type TreeCache = HashMap<H256, (H256, H256)>;
 /// the default hash of leaves
 pub const ZERO_HASH: H256 = [0u8; 32];
@@ -142,7 +142,7 @@ impl SparseMerkleTree {
     }
 
     /// get value of a leaf
-    pub fn get(&mut self, key: &H256) -> Result<&H256> {
+    pub fn get(&self, key: &H256) -> Result<&H256> {
         let mut node = &self.root;
         for branch in PathIter::from(key) {
             let children = self.cache.get(node).ok_or(Error::MissingKey(*node))?;
@@ -221,7 +221,6 @@ pub fn compress_proof(proof: Vec<H256>) -> Result<Vec<H256>> {
         if DEFAULT_TREE.1.contains_key(&node) {
             flags[i / 8] |= 1 << (HIGHEST_BIT_POS - (i as u8 % 8));
         } else {
-            dbg!(i, &node);
             compressed_proof.push(node);
         }
     }
@@ -290,7 +289,7 @@ mod tests {
     }
 
     fn test_merkle_proof_default(key: H256) {
-        let mut tree = SparseMerkleTree::default();
+        let tree = SparseMerkleTree::default();
         let value = *tree.get(&key).expect("get");
         let proof = tree.merkle_proof(&key).expect("proof");
         assert!(verify_proof(&proof, &tree.root, &key, &value));
