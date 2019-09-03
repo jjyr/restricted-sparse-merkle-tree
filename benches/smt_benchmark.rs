@@ -30,7 +30,7 @@ fn bench(c: &mut Criterion) {
                 random_smt(size, &mut rng)
             });
         },
-        &[10_000],
+        &[5_000, 10_000],
     );
 
     c.bench_function_over_inputs(
@@ -43,7 +43,7 @@ fn bench(c: &mut Criterion) {
                 smt.get(&key).unwrap();
             });
         },
-        &[10_000],
+        &[5_000, 10_000],
     );
 
     c.bench_function("SMT generate merkle proof", |b| {
