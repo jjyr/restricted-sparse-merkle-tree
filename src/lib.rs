@@ -15,8 +15,7 @@ const TREE_HEIGHT: usize = std::mem::size_of::<H256>() * 8;
 const HIGHEST_BIT_POS: u8 = 7;
 
 lazy_static! {
-    static ref DEFAULT_TREE: (H256, TreeCache) = compute_default_tree();
-    static ref DEFAULT_TREE_ROOT: H256 = DEFAULT_TREE.0;
+    static ref DEFAULT_TREE: SparseMerkleTree = compute_default_tree();
 }
 
 enum Branch {
@@ -75,7 +74,7 @@ fn merge(lhs: &H256, rhs: &H256) -> H256 {
 }
 
 /// precompute default tree
-fn compute_default_tree() -> (H256, TreeCache) {
+fn compute_default_tree() -> SparseMerkleTree {
     let mut hash = ZERO_HASH;
     let mut cache: TreeCache = Default::default();
     for _ in 0..256 {
@@ -83,10 +82,11 @@ fn compute_default_tree() -> (H256, TreeCache) {
         cache.insert(parent, (hash, hash));
         hash = parent;
     }
-    (hash, cache)
+    SparseMerkleTree::new(hash, cache)
 }
 
 /// Sparse merkle tree
+#[derive(Clone)]
 pub struct SparseMerkleTree {
     pub cache: TreeCache,
     pub root: H256,
@@ -94,7 +94,7 @@ pub struct SparseMerkleTree {
 
 impl Default for SparseMerkleTree {
     fn default() -> Self {
-        SparseMerkleTree::new(DEFAULT_TREE.0, DEFAULT_TREE.1.clone())
+        DEFAULT_TREE.clone()
     }
 }
 
@@ -218,7 +218,7 @@ pub fn compress_proof(proof: Vec<H256>) -> Result<Vec<H256>> {
     let mut flags: H256 = [0u8; 32];
     let mut compressed_proof = Vec::with_capacity(TREE_HEIGHT);
     for (i, node) in proof.into_iter().enumerate() {
-        if DEFAULT_TREE.1.contains_key(&node) {
+        if DEFAULT_TREE.cache.contains_key(&node) {
             flags[i / 8] |= 1 << (HIGHEST_BIT_POS - (i as u8 % 8));
         } else {
             compressed_proof.push(node);
@@ -237,9 +237,9 @@ pub fn decompress_proof(mut compressed_proof: Vec<H256>) -> Result<Vec<H256>> {
     }
     let flags: H256 = compressed_proof.pop().expect("flags");
     let mut proof = Vec::with_capacity(TREE_HEIGHT);
-    let mut node = &*DEFAULT_TREE_ROOT;
+    let mut node = &DEFAULT_TREE.root;
     for bit in PathIter::from(&flags) {
-        node = &DEFAULT_TREE.1[node].0;
+        node = &DEFAULT_TREE.cache[node].0;
         if (bit as u8) == 1 {
             proof.push(node.clone());
         } else {
