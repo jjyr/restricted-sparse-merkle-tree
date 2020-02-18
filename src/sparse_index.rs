@@ -1,4 +1,4 @@
-use crate::{get_bit, set_bit, EXPECTED_PATH_SIZE, H256, ZERO_HASH};
+use crate::{get_bit, set_bit, tree::EXPECTED_PATH_SIZE, vec::Vec, H256, ZERO_HASH};
 
 pub const MAX_LEN: usize = 256;
 

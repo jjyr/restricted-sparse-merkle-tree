@@ -3,7 +3,11 @@ extern crate criterion;
 
 use criterion::Criterion;
 use rand::{thread_rng, Rng};
-use sparse_merkle_tree::{verify_proof, SparseMerkleTree, H256};
+use sparse_merkle_tree::{
+    blake2b::Blake2bHasher,
+    tree::{verify_proof, SparseMerkleTree},
+    H256,
+};
 
 fn random_h256(rng: &mut impl Rng) -> H256 {
     let mut buf = [0u8; 32];
@@ -11,7 +15,10 @@ fn random_h256(rng: &mut impl Rng) -> H256 {
     buf
 }
 
-fn random_smt(update_count: usize, rng: &mut impl Rng) -> (SparseMerkleTree, Vec<H256>) {
+fn random_smt(
+    update_count: usize,
+    rng: &mut impl Rng,
+) -> (SparseMerkleTree<Blake2bHasher>, Vec<H256>) {
     let mut smt = SparseMerkleTree::default();
     let mut keys = Vec::with_capacity(update_count);
     for _ in 0..update_count {
@@ -64,7 +71,7 @@ fn bench(c: &mut Criterion) {
         let proof = smt.merkle_proof(&keys[0]).unwrap();
         let root = smt.root();
         b.iter(|| {
-            let valid = verify_proof(proof.clone(), root, &keys[0], value);
+            let valid = verify_proof::<Blake2bHasher>(proof.clone(), root, &keys[0], value);
             assert!(valid.expect("verify result"));
         });
     });
