@@ -3,7 +3,7 @@ extern crate criterion;
 
 use criterion::Criterion;
 use rand::{thread_rng, Rng};
-use sparse_merkle_tree::{compress_proof, decompress_proof, verify_proof, SparseMerkleTree, H256};
+use sparse_merkle_tree::{verify_proof, SparseMerkleTree, H256};
 
 fn random_h256(rng: &mut impl Rng) -> H256 {
     let mut buf = [0u8; 32];
@@ -11,14 +11,16 @@ fn random_h256(rng: &mut impl Rng) -> H256 {
     buf
 }
 
-fn random_smt(update_count: usize, rng: &mut impl Rng) -> SparseMerkleTree {
+fn random_smt(update_count: usize, rng: &mut impl Rng) -> (SparseMerkleTree, Vec<H256>) {
     let mut smt = SparseMerkleTree::default();
+    let mut keys = Vec::with_capacity(update_count);
     for _ in 0..update_count {
         let key = random_h256(rng);
         let value = random_h256(rng);
-        smt.update(&key, value).unwrap();
+        smt.update(key, value).unwrap();
+        keys.push(key);
     }
-    smt
+    (smt, keys)
 }
 
 fn bench(c: &mut Criterion) {
@@ -30,14 +32,14 @@ fn bench(c: &mut Criterion) {
                 random_smt(size, &mut rng)
             });
         },
-        &[5_000, 10_000],
+        &[100, 10_000],
     );
 
     c.bench_function_over_inputs(
         "SMT get",
         |b, &&size| {
             let mut rng = thread_rng();
-            let smt = random_smt(size, &mut rng);
+            let (smt, _keys) = random_smt(size, &mut rng);
             b.iter(|| {
                 let key = random_h256(&mut rng);
                 smt.get(&key).unwrap();
@@ -48,7 +50,7 @@ fn bench(c: &mut Criterion) {
 
     c.bench_function("SMT generate merkle proof", |b| {
         let mut rng = thread_rng();
-        let smt = random_smt(10_000, &mut rng);
+        let (smt, _keys) = random_smt(10_000, &mut rng);
         b.iter(|| {
             let key = random_h256(&mut rng);
             smt.merkle_proof(&key).unwrap();
@@ -57,35 +59,13 @@ fn bench(c: &mut Criterion) {
 
     c.bench_function("SMT verify merkle proof", |b| {
         let mut rng = thread_rng();
-        let smt = random_smt(10_000, &mut rng);
-        let key = random_h256(&mut rng);
-        let value = smt.get(&key).unwrap();
-        let proof = smt.merkle_proof(&key).unwrap();
-        let root = smt.root;
+        let (smt, keys) = random_smt(10_000, &mut rng);
+        let value = smt.get(&keys[0]).unwrap();
+        let proof = smt.merkle_proof(&keys[0]).unwrap();
+        let root = smt.root();
         b.iter(|| {
-            let valid = verify_proof(&proof, &root, &key, value);
-            assert!(valid);
-        });
-    });
-
-    c.bench_function("SMT compress merkle proof", |b| {
-        let mut rng = thread_rng();
-        let smt = random_smt(10_000, &mut rng);
-        let key = random_h256(&mut rng);
-        let proof = smt.merkle_proof(&key).unwrap();
-        b.iter(|| {
-            compress_proof(proof.clone()).unwrap();
-        });
-    });
-
-    c.bench_function("SMT decompress merkle proof", |b| {
-        let mut rng = thread_rng();
-        let smt = random_smt(10_000, &mut rng);
-        let key = random_h256(&mut rng);
-        let proof = smt.merkle_proof(&key).unwrap();
-        let compressed_proof = compress_proof(proof).unwrap();
-        b.iter(|| {
-            decompress_proof(compressed_proof.clone()).unwrap();
+            let valid = verify_proof(proof.clone(), root, &keys[0], value);
+            assert!(valid.expect("verify result"));
         });
     });
 }

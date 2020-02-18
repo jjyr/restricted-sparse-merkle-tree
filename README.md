@@ -5,6 +5,8 @@
 
 Sparse merkle tree implement in rust.
 
+**Notice** this library is not stable yet; API and proof format may changes. Make sure you know what you are doing before using this library.
+
 ## License
 
 MIT
