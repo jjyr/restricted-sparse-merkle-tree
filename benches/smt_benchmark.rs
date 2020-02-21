@@ -3,16 +3,14 @@ extern crate criterion;
 
 use criterion::Criterion;
 use rand::{thread_rng, Rng};
-use sparse_merkle_tree::{
-    blake2b::Blake2bHasher,
-    tree::{verify_proof, SparseMerkleTree},
-    H256,
-};
+use sparse_merkle_tree::{blake2b::Blake2bHasher, tree::SparseMerkleTree, H256};
+
+const TARGET_LEAVES_COUNT: usize = 20;
 
 fn random_h256(rng: &mut impl Rng) -> H256 {
     let mut buf = [0u8; 32];
     rng.fill(&mut buf);
-    buf
+    buf.into()
 }
 
 fn random_smt(
@@ -57,21 +55,29 @@ fn bench(c: &mut Criterion) {
 
     c.bench_function("SMT generate merkle proof", |b| {
         let mut rng = thread_rng();
-        let (smt, _keys) = random_smt(10_000, &mut rng);
+        let (smt, mut keys) = random_smt(10_000, &mut rng);
+        keys.dedup();
+        let keys: Vec<_> = keys.into_iter().take(TARGET_LEAVES_COUNT).collect();
         b.iter(|| {
-            let key = random_h256(&mut rng);
-            smt.merkle_proof(&key).unwrap();
+            smt.merkle_proof(keys.clone()).unwrap();
         });
     });
 
     c.bench_function("SMT verify merkle proof", |b| {
         let mut rng = thread_rng();
-        let (smt, keys) = random_smt(10_000, &mut rng);
-        let value = smt.get(&keys[0]).unwrap();
-        let proof = smt.merkle_proof(&keys[0]).unwrap();
+        let (smt, mut keys) = random_smt(10_000, &mut rng);
+        keys.dedup();
+        let leaves: Vec<_> = keys
+            .iter()
+            .take(TARGET_LEAVES_COUNT)
+            .map(|k| (*k, *smt.get(k).unwrap()))
+            .collect();
+        let proof = smt
+            .merkle_proof(keys.into_iter().take(TARGET_LEAVES_COUNT).collect())
+            .unwrap();
         let root = smt.root();
         b.iter(|| {
-            let valid = verify_proof::<Blake2bHasher>(proof.clone(), root, &keys[0], value);
+            let valid = proof.clone().verify::<Blake2bHasher>(root, leaves.clone());
             assert!(valid.expect("verify result"));
         });
     });

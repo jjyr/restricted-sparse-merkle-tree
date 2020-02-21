@@ -1,16 +1,17 @@
 use crate::{
+    collections::{BTreeMap, VecDeque},
     error::{Error, Result},
-    get_bit,
     hasher::Hasher,
     sparse_index::SparseIndex,
     store::Store,
     vec::Vec,
-    H256, TREE_HEIGHT, ZERO_HASH,
+    H256,
 };
 use core::marker::PhantomData;
 
 /// log2(256) * 2
 pub const EXPECTED_PATH_SIZE: usize = 16;
+const TREE_HEIGHT: usize = 256;
 
 /// A branch in the SMT
 #[derive(Debug, Eq, PartialEq)]
@@ -55,9 +56,9 @@ impl Node {
 /// this function optimized for ZERO_HASH
 /// if one of lhs or rhs is ZERO_HASH, this function just return another one
 fn merge<H: Hasher + Default>(lhs: &H256, rhs: &H256) -> H256 {
-    if lhs == &ZERO_HASH {
+    if lhs.is_zero() {
         return *rhs;
-    } else if rhs == &ZERO_HASH {
+    } else if rhs.is_zero() {
         return *lhs;
     }
     let mut hasher = H::default();
@@ -75,7 +76,7 @@ pub fn hash_leaf<H: Hasher + Default>(key: &H256, value: &H256) -> H256 {
 }
 
 /// Sparse merkle tree
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct SparseMerkleTree<H> {
     store: Store,
     root: H256,
@@ -97,6 +98,10 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
         &self.root
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.root.is_zero()
+    }
+
     /// Get backend store
     pub fn store(&self) -> &Store {
         &self.store
@@ -110,13 +115,13 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
         // walk path from top to bottom
         for height in (0..TREE_HEIGHT).rev() {
             // the descendants are all zeros
-            if node == ZERO_HASH {
+            if node.is_zero() {
                 path.set_len(TREE_HEIGHT);
                 break;
             }
             match self.store.remove(&(height, node)).and_then(|n| n.branch()) {
                 Some(BranchNode { left, right }) => {
-                    let is_right = get_bit(&key, height);
+                    let is_right = key.get_bit(height as u8);
                     if is_right {
                         node = right;
                         path.push(left);
@@ -140,8 +145,8 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
         // recompute the tree from bottom to top
         let mut node = leaf_key;
         for height in 0..TREE_HEIGHT {
-            let is_right = get_bit(&key, height);
-            let sibling = path.pop().unwrap_or(ZERO_HASH);
+            let is_right = key.get_bit(height as u8);
+            let sibling = path.pop().unwrap_or_else(H256::zero);
             let (parent, branch_node) = if is_right {
                 (
                     merge::<H>(&sibling, &node),
@@ -168,11 +173,12 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
 
     /// Get value of a leaf
     pub fn get(&self, key: &H256) -> Result<&H256> {
+        const ZERO: H256 = H256::zero();
         let mut node = &self.root;
         for height in (0..TREE_HEIGHT).rev() {
             // children must equals to zero when parent equals to zero
-            if node == &ZERO_HASH {
-                return Ok(&ZERO_HASH);
+            if node.is_zero() {
+                return Ok(&ZERO);
             }
             let (left, right) = match self
                 .store
@@ -182,7 +188,7 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
                 Some(BranchNode { left, right }) => (left, right),
                 None => return Err(Error::MissingKey(height, *node)),
             };
-            let is_right = get_bit(key, height);
+            let is_right = key.get_bit(height as u8);
             if is_right {
                 node = &right;
             } else {
@@ -196,19 +202,19 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
             .ok_or(Error::MissingKey(0, *node))
     }
 
-    /// Generate merkle proof
-    pub fn merkle_proof(&self, key: &H256) -> Result<Vec<H256>> {
-        // return empty proof for empty tree
-        if self.root == ZERO_HASH {
-            return Ok(Vec::new());
-        }
-
+    // TODO
+    // optimize this function, we can start from a common parent node
+    // cache: (height, key) -> node
+    fn fetch_merkle_path(
+        &self,
+        key: &H256,
+        cache: &mut BTreeMap<(usize, H256), H256>,
+    ) -> Result<()> {
         let mut node = &self.root;
         // notate the side of the path for each proof item
-        let mut path = SparseIndex::default();
         for height in (0..TREE_HEIGHT).rev() {
             // all decendents should just be zeros
-            if node == &ZERO_HASH {
+            if node.is_zero() {
                 break;
             }
             let (left, right) = match self
@@ -220,66 +226,260 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
                 None => return Err(Error::MissingKey(height, *node)),
             };
 
-            let is_right = get_bit(key, height);
-            if is_right {
-                // mark index, we are on the right path!
+            let is_right = key.get_bit(height as u8);
+
+            let mut sibling_key = key.copy_bits(height + 1..);
+
+            let sibling = if is_right {
                 node = &right;
-                path.push(*left);
+                left
             } else {
+                // mark sibling's index, sibling on the right path.
+                sibling_key.set_bit(height as u8);
                 node = &left;
-                path.push(*right);
+                right
+            };
+            if !sibling.is_zero() {
+                cache.entry((height, sibling_key)).or_insert(*sibling);
             }
         }
-        Ok(path.into_vec())
+        Ok(())
     }
-}
 
-/// Verify merkle proof
-/// see compute_root_from_proof
-pub fn verify_proof<H: Hasher + Default>(
-    proof: Vec<H256>,
-    root: &H256,
-    key: &H256,
-    value: &H256,
-) -> Result<bool> {
-    let calculated_root = compute_root_from_proof::<H>(proof, key, value)?;
-    Ok(&calculated_root == root)
-}
-
-/// Compute root from proof
-/// proof is a array contains generated merkle path and a sparse index
-/// NOTICE even we can calculate a root from proof, it only means the proof's format is correct,
-/// doesn't represent the proof itself is valid.
-///
-/// return EmptyProof error when proof is empty
-/// return CorruptedProof error when proof is invalid
-pub fn compute_root_from_proof<H: Hasher + Default>(
-    proof: Vec<H256>,
-    key: &H256,
-    value: &H256,
-) -> Result<H256> {
-    // technically, a sparse merkle tree
-    // constains at least 1 element to represent sparse index,
-    // and constains at most TREE_HEIGHT plus 1 elements
-    if proof.is_empty() {
-        return Err(Error::EmptyProof);
-    }
-    let mut path = SparseIndex::from_vec(proof, TREE_HEIGHT).ok_or(Error::CorruptedProof)?;
-
-    let leaf_key = hash_leaf::<H>(key, &value);
-    let mut node = leaf_key;
-    // verify tree from bottom to top
-    for i in 0..TREE_HEIGHT {
-        let sibling = path.pop().unwrap_or(ZERO_HASH);
-        let is_right = get_bit(&key, i);
-        if is_right {
-            node = merge::<H>(&sibling, &node);
-        } else {
-            node = merge::<H>(&node, &sibling);
+    /// Generate merkle proof
+    pub fn merkle_proof(&self, mut keys: Vec<H256>) -> Result<MerkleProof> {
+        if keys.is_empty() {
+            return Err(Error::EmptyKeys);
         }
+
+        // return empty proof for empty tree
+        if self.root.is_zero() {
+            return Err(Error::EmptyTree);
+        }
+
+        // sort keys
+        keys.sort_unstable();
+
+        // fetch all merkle path
+        let mut cache: BTreeMap<(usize, H256), H256> = Default::default();
+        for k in &keys {
+            self.fetch_merkle_path(k, &mut cache)?;
+        }
+
+        // (node, height)
+        let mut proof: Vec<(H256, u8)> = Vec::with_capacity(EXPECTED_PATH_SIZE * keys.len());
+        // key_index -> merkle path height
+        let mut leaves_path: Vec<Vec<u8>> = Vec::with_capacity(keys.len());
+        leaves_path.resize_with(keys.len(), Default::default);
+
+        let keys_len = keys.len();
+        // build merkle proofs from bottom to up
+        // (key, height, key_index)
+        let mut queue: VecDeque<(H256, usize, usize)> = keys
+            .into_iter()
+            .enumerate()
+            .map(|(i, k)| (k, 0, i))
+            .collect();
+
+        while let Some((key, height, leaf_index)) = queue.pop_front() {
+            if queue.is_empty() && cache.is_empty() || height == TREE_HEIGHT {
+                if leaves_path[leaf_index].is_empty() {
+                    leaves_path[leaf_index].push(core::u8::MAX);
+                }
+                break;
+            }
+            // get sibling key
+            let mut sibling_key = key.copy_bits(height + 1..);
+
+            let is_right = key.get_bit(height as u8);
+            if is_right {
+                // sibling on left
+                sibling_key.clear_bit(height as u8);
+            } else {
+                // sibling on right
+                sibling_key.set_bit(height as u8);
+            }
+            if Some((&sibling_key, &height))
+                == queue
+                    .front()
+                    .map(|(sibling_key, height, _leaf_index)| (sibling_key, height))
+            {
+                // drop the sibling
+                let (_sibling_key, height, leaf_index) = queue.pop_front().unwrap();
+                leaves_path[leaf_index].push(height as u8);
+            } else {
+                match cache.get(&(height, sibling_key)) {
+                    Some(sibling) => {
+                        debug_assert!(height <= core::u8::MAX as usize);
+                        // save first non-zero sibling's height for leaves
+                        proof.push((*sibling, height as u8));
+                    }
+                    None => {
+                        // skip zero siblings
+                        if !is_right {
+                            sibling_key.clear_bit(height as u8);
+                        }
+                        let parent_key = sibling_key;
+                        queue.push_back((parent_key, height + 1, leaf_index));
+                        continue;
+                    }
+                }
+            }
+            leaves_path[leaf_index].push(height as u8);
+            if height < TREE_HEIGHT {
+                // get parent_key
+                let parent_key = if is_right { sibling_key } else { key };
+                queue.push_back((parent_key, height + 1, leaf_index));
+            }
+        }
+        debug_assert_eq!(leaves_path.len(), keys_len);
+        Ok(MerkleProof::new(leaves_path, proof))
     }
-    if !path.buf().is_empty() {
-        return Err(Error::CorruptedProof);
+}
+
+#[derive(Debug, Clone)]
+pub struct MerkleProof {
+    leaves_path: Vec<Vec<u8>>,
+    proof: Vec<(H256, u8)>,
+}
+
+impl MerkleProof {
+    /// Create MerkleProof
+    /// leaves_path: contains height of non-zero siblings
+    /// proof: contains merkle path for each leaves it's height
+    pub fn new(leaves_path: Vec<Vec<u8>>, proof: Vec<(H256, u8)>) -> Self {
+        MerkleProof { leaves_path, proof }
     }
-    Ok(node)
+
+    /// Destruct the structure, useful for serialization
+    pub fn take(self) -> (Vec<Vec<u8>>, Vec<(H256, u8)>) {
+        let MerkleProof { leaves_path, proof } = self;
+        (leaves_path, proof)
+    }
+
+    /// number of leaves required by this merkle proof
+    pub fn leaves_count(&self) -> usize {
+        self.leaves_path.len()
+    }
+
+    /// return the inner leaves_path vector
+    pub fn leaves_path(&self) -> &Vec<Vec<u8>> {
+        &self.leaves_path
+    }
+
+    /// return proof merkle path
+    pub fn proof(&self) -> &Vec<(H256, u8)> {
+        &self.proof
+    }
+
+    /// Compute root from proof
+    /// leaves: a vector of (key, value)
+    ///
+    /// return EmptyProof error when proof is empty
+    /// return CorruptedProof error when proof is invalid
+    pub fn compute_root<H: Hasher + Default>(self, mut leaves: Vec<(H256, H256)>) -> Result<H256> {
+        if leaves.is_empty() {
+            return Err(Error::EmptyKeys);
+        } else if leaves.len() != self.leaves_count() {
+            return Err(Error::IncorrectNumberOfLeaves {
+                expected: self.leaves_count(),
+                actual: leaves.len(),
+            });
+        }
+
+        let (mut leaves_path, proof) = self.take();
+        let mut proof: VecDeque<_> = proof.into();
+
+        // sort leaves
+        leaves.sort_unstable_by_key(|(k, _v)| *k);
+        // tree_buf: (height, key) -> (key_index, node)
+        let mut tree_buf: BTreeMap<_, _> = leaves
+            .into_iter()
+            .enumerate()
+            .map(|(i, (k, v))| ((0, k), (i, hash_leaf::<H>(&k, &v))))
+            .collect();
+
+        // rebuild the tree from bottom to top
+        while !tree_buf.is_empty() {
+            // pop_front from tree_buf, the API is unstable
+            let (&(mut height, key), &(leaf_index, node)) = tree_buf.iter().next().unwrap();
+            tree_buf.remove(&(height, key));
+
+            if proof.is_empty() && tree_buf.is_empty() {
+                return Ok(node);
+            } else if height == TREE_HEIGHT {
+                if !proof.is_empty() {
+                    return Err(Error::CorruptedProof);
+                }
+                return Ok(node);
+            }
+
+            let mut sibling_key = key.copy_bits(height + 1..);
+            if !key.get_bit(height as u8) {
+                sibling_key.set_bit(height as u8)
+            }
+            let (sibling, sibling_height) =
+                if Some(&(height, sibling_key)) == tree_buf.keys().next() {
+                    let (_leaf_index, sibling) = tree_buf
+                        .remove(&(height, sibling_key))
+                        .expect("pop sibling");
+                    (sibling, height)
+                } else {
+                    let merge_height = leaves_path[leaf_index]
+                        .get(0)
+                        .map(|h| *h as usize)
+                        .unwrap_or(height);
+                    if height != merge_height {
+                        debug_assert!(height < merge_height);
+                        let parent_key = key.copy_bits(merge_height..);
+                        // skip zeros
+                        tree_buf.insert((merge_height, parent_key), (leaf_index, node));
+                        continue;
+                    }
+                    match proof.pop_front() {
+                        Some((node, height)) => {
+                            debug_assert_eq!(height, leaves_path[leaf_index][0]);
+                            (node, height as usize)
+                        }
+                        None => {
+                            let parent_key = if key.get_bit(height as u8) {
+                                sibling_key
+                            } else {
+                                key
+                            };
+                            // skip zeros
+                            tree_buf.insert((height + 1, parent_key), (leaf_index, node));
+                            continue;
+                        }
+                    }
+                };
+            debug_assert!(height <= sibling_height);
+            if height < sibling_height {
+                height = sibling_height;
+            }
+            // skip zero merkle path
+            let parent_key = key.copy_bits(height + 1..);
+
+            let parent = if key.get_bit(height as u8) {
+                merge::<H>(&sibling, &node)
+            } else {
+                merge::<H>(&node, &sibling)
+            };
+            leaves_path[leaf_index].remove(0);
+            tree_buf.insert((height + 1, parent_key), (leaf_index, parent));
+        }
+
+        Err(Error::CorruptedProof)
+    }
+
+    /// Verify merkle proof
+    /// see compute_root_from_proof
+    pub fn verify<H: Hasher + Default>(
+        self,
+        root: &H256,
+        leaves: Vec<(H256, H256)>,
+    ) -> Result<bool> {
+        let calculated_root = self.compute_root::<H>(leaves)?;
+        Ok(&calculated_root == root)
+    }
 }

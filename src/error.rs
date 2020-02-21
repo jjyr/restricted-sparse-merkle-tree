@@ -7,6 +7,9 @@ pub enum Error {
     MissingKey(usize, H256),
     CorruptedProof,
     EmptyProof,
+    EmptyKeys,
+    EmptyTree,
+    IncorrectNumberOfLeaves { expected: usize, actual: usize },
 }
 
 impl core::fmt::Display for Error {
@@ -20,6 +23,19 @@ impl core::fmt::Display for Error {
             }
             Error::EmptyProof => {
                 write!(f, "Empty proof")?;
+            }
+            Error::EmptyKeys => {
+                write!(f, "Empty keys")?;
+            }
+            Error::EmptyTree => {
+                write!(f, "Empty tree")?;
+            }
+            Error::IncorrectNumberOfLeaves { expected, actual } => {
+                write!(
+                    f,
+                    "Incorrect number of leaves, expected {} actual {}",
+                    expected, actual
+                )?;
             }
         }
         Ok(())
