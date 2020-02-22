@@ -308,11 +308,11 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
                 let (_sibling_key, height, leaf_index) = queue.pop_front().unwrap();
                 leaves_path[leaf_index].push(height as u8);
             } else {
-                match cache.get(&(height, sibling_key)) {
+                match cache.remove(&(height, sibling_key)) {
                     Some(sibling) => {
                         debug_assert!(height <= core::u8::MAX as usize);
                         // save first non-zero sibling's height for leaves
-                        proof.push((*sibling, height as u8));
+                        proof.push((sibling, height as u8));
                     }
                     None => {
                         // skip zero siblings
@@ -388,7 +388,8 @@ impl MerkleProof {
             });
         }
 
-        let (mut leaves_path, proof) = self.take();
+        let (leaves_path, proof) = self.take();
+        let mut leaves_path: Vec<VecDeque<_>> = leaves_path.into_iter().map(Into::into).collect();
         let mut proof: VecDeque<_> = proof.into();
 
         // sort leaves
@@ -426,7 +427,7 @@ impl MerkleProof {
                     (sibling, height)
                 } else {
                     let merge_height = leaves_path[leaf_index]
-                        .get(0)
+                        .front()
                         .map(|h| *h as usize)
                         .unwrap_or(height);
                     if height != merge_height {
@@ -452,7 +453,7 @@ impl MerkleProof {
             } else {
                 merge::<H>(&node, &sibling)
             };
-            leaves_path[leaf_index].remove(0);
+            leaves_path[leaf_index].pop_front();
             tree_buf.insert((height + 1, parent_key), (leaf_index, parent));
         }
 
