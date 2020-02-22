@@ -202,9 +202,8 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
             .ok_or(Error::MissingKey(0, *node))
     }
 
-    // TODO
-    // optimize this function, we can start from a common parent node
-    // cache: (height, key) -> node
+    /// fetch merkle path of key into cache
+    /// cache: (height, key) -> node
     fn fetch_merkle_path(
         &self,
         key: &H256,
@@ -228,7 +227,7 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
 
             let is_right = key.get_bit(height as u8);
 
-            let mut sibling_key = key.copy_bits(height + 1..);
+            let mut sibling_key = key.parent_path(height as u8);
 
             let sibling = if is_right {
                 node = &right;
@@ -290,7 +289,7 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
                 break;
             }
             // compute sibling key
-            let mut sibling_key = key.copy_bits(height + 1..);
+            let mut sibling_key = key.parent_path(height as u8);
 
             let is_right = key.get_bit(height as u8);
             if is_right {
@@ -400,7 +399,6 @@ impl MerkleProof {
             .enumerate()
             .map(|(i, (k, v))| ((0, k), (i, hash_leaf::<H>(&k, &v))))
             .collect();
-
         // rebuild the tree from bottom to top
         while !tree_buf.is_empty() {
             // pop_front from tree_buf, the API is unstable
@@ -416,7 +414,7 @@ impl MerkleProof {
                 return Ok(node);
             }
 
-            let mut sibling_key = key.copy_bits(height + 1..);
+            let mut sibling_key = key.parent_path(height as u8);
             if !key.get_bit(height as u8) {
                 sibling_key.set_bit(height as u8)
             }
@@ -433,7 +431,7 @@ impl MerkleProof {
                         .unwrap_or(height);
                     if height != merge_height {
                         debug_assert!(height < merge_height);
-                        let parent_key = key.copy_bits(merge_height..);
+                        let parent_key = key.copy_bits(merge_height as u8..);
                         // skip zeros
                         tree_buf.insert((merge_height, parent_key), (leaf_index, node));
                         continue;
@@ -447,7 +445,7 @@ impl MerkleProof {
                 height = sibling_height;
             }
             // skip zero merkle path
-            let parent_key = key.copy_bits(height + 1..);
+            let parent_key = key.parent_path(height as u8);
 
             let parent = if key.get_bit(height as u8) {
                 merge::<H>(&sibling, &node)

@@ -21,7 +21,6 @@ impl Default for SparseIndex {
 }
 
 impl SparseIndex {
-    /// values must push in order by index (1 -> 2 -> 3), otherwise the behavior is undefined
     pub fn push(&mut self, v: H256) {
         assert!(self.len < MAX_LEN, "too many elements");
         if !v.is_zero() {

@@ -14,6 +14,7 @@ impl H256 {
         self == &ZERO
     }
 
+    #[inline]
     pub fn get_bit(&self, i: u8) -> bool {
         let byte_pos = i / BYTE_SIZE;
         let bit_pos = i % BYTE_SIZE;
@@ -21,12 +22,14 @@ impl H256 {
         bit != 0
     }
 
+    #[inline]
     pub fn set_bit(&mut self, i: u8) {
         let byte_pos = i / BYTE_SIZE;
         let bit_pos = i % BYTE_SIZE;
         self.0[byte_pos as usize] |= 1 << bit_pos as u8;
     }
 
+    #[inline]
     pub fn clear_bit(&mut self, i: u8) {
         let byte_pos = i / BYTE_SIZE;
         let bit_pos = i % BYTE_SIZE;
@@ -37,29 +40,56 @@ impl H256 {
         &self.0[..]
     }
 
-    // TODO optimize
-    pub fn copy_bits(&self, range: impl core::ops::RangeBounds<usize>) -> Self {
+    pub fn parent_path(&self, height: u8) -> Self {
+        height
+            .checked_add(1)
+            .map(|i| self.copy_bits(i..))
+            .unwrap_or_else(H256::zero)
+    }
+
+    /// Copy bits to a new H256
+    pub fn copy_bits(&self, range: impl core::ops::RangeBounds<u8>) -> Self {
         const MAX: usize = 256;
+        const BYTE: usize = 8;
         use core::ops::Bound;
 
         let mut target = H256::zero();
         let start = match range.start_bound() {
-            Bound::Included(&i) => i,
+            Bound::Included(&i) => i as usize,
             Bound::Excluded(&i) => panic!("do not allows excluded start: {}", i),
             Bound::Unbounded => 0,
         };
 
-        let end = match range.end_bound() {
-            Bound::Included(&i) => i.saturating_add(1),
-            Bound::Excluded(&i) => i,
-            Bound::Unbounded => core::cmp::max(MAX, start),
+        let mut end = match range.end_bound() {
+            Bound::Included(&i) => i.saturating_add(1) as usize,
+            Bound::Excluded(&i) => i as usize,
+            Bound::Unbounded => MAX,
         };
+
+        if start >= MAX {
+            return target;
+        } else if end > MAX {
+            end = MAX;
+        }
 
         if end < start {
             panic!("end can't less than start: start {} end {}", start, end);
         }
 
-        for i in start..end {
+        let start_byte = {
+            let remain = if start % BYTE != 0 { 1 } else { 0 };
+            start / BYTE + remain
+        };
+        let end_byte = end / BYTE;
+        // copy bytes
+        if start_byte < self.0.len() && start_byte <= end_byte {
+            target.0[start_byte..end_byte].copy_from_slice(&self.0[start_byte..end_byte]);
+        }
+
+        // copy remain bits
+        for i in (start..core::cmp::min(start_byte * BYTE, end))
+            .chain(core::cmp::max(end_byte * BYTE, start)..end)
+        {
             if self.get_bit(i as u8) {
                 target.set_bit(i as u8)
             }

@@ -110,13 +110,6 @@ fn leaves(
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig {
-        max_global_rejects: 1,
-        timeout: 120_000,
-        max_shrink_time: 10_000,
-        .. ProptestConfig::default()
-    })]
-
     #[test]
     fn test_h256(key: [u8; 32], key2: [u8; 32]) {
         let mut list1: Vec<H256> = vec![key.into() , key2.into()];
@@ -136,6 +129,23 @@ proptest! {
             std::cmp::Ordering::Equal
         });
         assert_eq!(list1, list2);
+    }
+
+    #[test]
+    fn test_h256_copy_bits(start in 0u8..254u8, size in 1u8..255u8) {
+        let one: H256 = [255u8; 32].into();
+        let target = one.copy_bits(start..(start.saturating_add(size)));
+        for i in start..start.saturating_add(size) {
+            assert_eq!(one.get_bit(i as u8), target.get_bit(i as u8));
+        }
+        for i in 0..start {
+            assert!(!target.get_bit(i as u8));
+        }
+        if let Some(start_i) = start.checked_add(size).and_then(|i| i.checked_add(1)){
+            for i in start_i..=255 {
+                assert!(!target.get_bit(i as u8));
+            }
+        }
     }
 
     #[test]
