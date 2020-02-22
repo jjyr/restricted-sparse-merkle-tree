@@ -283,12 +283,13 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
 
         while let Some((key, height, leaf_index)) = queue.pop_front() {
             if queue.is_empty() && cache.is_empty() || height == TREE_HEIGHT {
+                // tree only contains one leaf
                 if leaves_path[leaf_index].is_empty() {
                     leaves_path[leaf_index].push(core::u8::MAX);
                 }
                 break;
             }
-            // get sibling key
+            // compute sibling key
             let mut sibling_key = key.copy_bits(height + 1..);
 
             let is_right = key.get_bit(height as u8);
@@ -304,7 +305,7 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
                     .front()
                     .map(|(sibling_key, height, _leaf_index)| (sibling_key, height))
             {
-                // drop the sibling
+                // drop the sibling, mark sibling's merkle path
                 let (_sibling_key, height, leaf_index) = queue.pop_front().unwrap();
                 leaves_path[leaf_index].push(height as u8);
             } else {
@@ -325,9 +326,10 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
                     }
                 }
             }
+            // find new non-zero sibling, append to leaf's path
             leaves_path[leaf_index].push(height as u8);
             if height < TREE_HEIGHT {
-                // get parent_key
+                // get parent_key, which k.get_bit(height) is false
                 let parent_key = if is_right { sibling_key } else { key };
                 queue.push_back((parent_key, height + 1, leaf_index));
             }
@@ -436,22 +438,9 @@ impl MerkleProof {
                         tree_buf.insert((merge_height, parent_key), (leaf_index, node));
                         continue;
                     }
-                    match proof.pop_front() {
-                        Some((node, height)) => {
-                            debug_assert_eq!(height, leaves_path[leaf_index][0]);
-                            (node, height as usize)
-                        }
-                        None => {
-                            let parent_key = if key.get_bit(height as u8) {
-                                sibling_key
-                            } else {
-                                key
-                            };
-                            // skip zeros
-                            tree_buf.insert((height + 1, parent_key), (leaf_index, node));
-                            continue;
-                        }
-                    }
+                    let (node, height) = proof.pop_front().expect("pop proof");
+                    debug_assert_eq!(height, leaves_path[leaf_index][0]);
+                    (node, height as usize)
                 };
             debug_assert!(height <= sibling_height);
             if height < sibling_height {

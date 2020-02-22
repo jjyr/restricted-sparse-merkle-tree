@@ -168,7 +168,7 @@ proptest! {
     }
 
     #[test]
-    fn test_smt_single_leaf_large((pairs, _n) in leaves(50, 200)){
+    fn test_smt_single_leaf_large((pairs, _n) in leaves(50, 100)){
         let smt = new_smt(pairs.clone());
         for (k, v) in pairs {
             let proof = smt.merkle_proof(vec![k]).expect("gen proof");
@@ -184,7 +184,7 @@ proptest! {
     }
 
     #[test]
-    fn test_smt_multi_leaves_large((pairs, _n) in leaves(50, 200)){
+    fn test_smt_multi_leaves_large((pairs, _n) in leaves(50, 100)){
         let n = 20;
         let smt = new_smt(pairs.clone());
         let proof = smt.merkle_proof(pairs.iter().take(n).map(|(k, _v)| *k).collect()).expect("gen proof");
