@@ -68,7 +68,11 @@ fn merge<H: Hasher + Default>(lhs: &H256, rhs: &H256) -> H256 {
 }
 
 /// hash_leaf = hash(key | value)
-pub fn hash_leaf<H: Hasher + Default>(key: &H256, value: &H256) -> H256 {
+/// zero value represent delete the key, this function return zero for zero value
+fn hash_leaf<H: Hasher + Default>(key: &H256, value: &H256) -> H256 {
+    if value.is_zero() {
+        return H256::zero();
+    }
     let mut hasher = H::default();
     hasher.write_h256(key);
     hasher.write_h256(value);
@@ -108,6 +112,7 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
     }
 
     /// Update a leaf, return new merkle root
+    /// set a key to zero to delete the key
     pub fn update(&mut self, key: H256, value: H256) -> Result<&H256> {
         let mut node = self.root;
         // store the path, sparse index will ignore zero members
@@ -137,13 +142,19 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
         self.store.remove(&(TREE_HEIGHT, node));
 
         // compute and store new leaf
-        let leaf_key = hash_leaf::<H>(&key, &value);
-        // store leaf on TREE_HEIGHT, so no other key will conflict with it
-        self.store
-            .insert((TREE_HEIGHT, leaf_key), Node::Leaf(LeafNode { key, value }));
+        let mut node = {
+            // insert the new leaf
+            let leaf_key = hash_leaf::<H>(&key, &value);
+            // store leaf on TREE_HEIGHT, so no other key will conflict with it
+            // notice when value is zero the leaf is deleted, so we do not need to store it
+            if !leaf_key.is_zero() {
+                self.store
+                    .insert((TREE_HEIGHT, leaf_key), Node::Leaf(LeafNode { key, value }));
+            }
+            leaf_key
+        };
 
         // recompute the tree from bottom to top
-        let mut node = leaf_key;
         for height in 0..TREE_HEIGHT {
             let is_right = key.get_bit(height as u8);
             let sibling = path.pop().unwrap_or_else(H256::zero);
@@ -194,6 +205,11 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
             } else {
                 node = &left;
             }
+        }
+
+        // return zero is leaf_key is zero
+        if node.is_zero() {
+            return Ok(&ZERO);
         }
         // get leaf node
         self.store
@@ -251,7 +267,6 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
             return Err(Error::EmptyKeys);
         }
 
-        // return empty proof for empty tree
         if self.root.is_zero() {
             return Err(Error::EmptyTree);
         }
