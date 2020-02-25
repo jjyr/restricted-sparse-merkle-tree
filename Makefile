@@ -1,4 +1,4 @@
-default: fmt clippy test bench-test
+default: fmt clippy test bench-test check
 
 test:
 	cargo test --all --all-features
@@ -11,3 +11,6 @@ clippy:
 
 fmt:
 	cargo fmt --all -- --check
+
+check:
+	cargo check --no-default-features

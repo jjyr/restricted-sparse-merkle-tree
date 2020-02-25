@@ -52,7 +52,7 @@ fn test_update(key: H256, value: H256) {
 }
 
 fn test_update_tree_store(key: H256, value: H256, value2: H256) {
-    const EXPECTED_LEN: usize = 257;
+    const EXPECTED_LEN: usize = 2;
 
     let mut tree = SparseMerkleTree::<Blake2bHasher>::default();
     tree.update(key, value).expect("update");
@@ -67,11 +67,13 @@ fn test_merkle_proof(key: H256, value: H256) {
 
     let mut tree = SparseMerkleTree::<Blake2bHasher>::default();
     tree.update(key, value).expect("update");
-    let proof = tree.merkle_proof(vec![key]).expect("proof");
-    assert!(proof.proof().len() < EXPECTED_PROOF_SIZE);
-    assert!(proof
-        .verify::<Blake2bHasher>(tree.root(), vec![(key, value)])
-        .expect("verify"));
+    if !tree.is_empty() {
+        let proof = tree.merkle_proof(vec![key]).expect("proof");
+        assert!(proof.proof().len() < EXPECTED_PROOF_SIZE);
+        assert!(proof
+            .verify::<Blake2bHasher>(tree.root(), vec![(key, value)])
+            .expect("verify"));
+    }
 }
 
 fn new_smt(pairs: Vec<(H256, H256)>) -> SparseMerkleTree<Blake2bHasher> {
@@ -225,6 +227,14 @@ proptest! {
             let proof = smt.merkle_proof(keys.clone()).expect("gen proof");
             assert!(proof.verify::<Blake2bHasher>(smt.root(),
                 keys.into_iter().map(|k|(k, *smt.get(&k).expect("get"))).collect()).expect("verify proof"));
+        }
+    }
+
+    #[test]
+    fn test_update_smt_tree_store((pairs, n) in leaves(1, 20)) {
+        let smt = new_smt(pairs.clone());
+        for (k, v) in pairs.into_iter().take(n) {
+            assert_eq!(smt.get(&k), Ok(&v));
         }
     }
 }

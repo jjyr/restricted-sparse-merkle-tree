@@ -40,6 +40,15 @@ impl H256 {
         &self.0[..]
     }
 
+    pub fn fork_height(&self, key: &H256) -> u8 {
+        for h in (0..=core::u8::MAX).rev() {
+            if self.get_bit(h) != key.get_bit(h) {
+                return h;
+            }
+        }
+        0
+    }
+
     pub fn parent_path(&self, height: u8) -> Self {
         height
             .checked_add(1)
