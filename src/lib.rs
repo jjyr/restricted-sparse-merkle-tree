@@ -5,7 +5,6 @@ pub mod blake2b;
 pub mod error;
 pub mod h256;
 pub mod hasher;
-mod sparse_index;
 pub mod store;
 #[cfg(test)]
 mod tests;
