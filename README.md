@@ -5,6 +5,16 @@
 
 A construction optimized sparse merkle tree.
 
+| size | proof size | update | get | merkle proof | verify proof |
+| --- | --- | --- | --- | --- | --- |
+| 2n + log(n) | log(n) | log(n) | log(n) | log(n) | log(n) |
+
+Features:
+
+* Generate / Verify multi-leaves merkle proof
+* Customize hash function
+* Rust `no_std` support
+
 **Notice** this library is not stable yet; API and proof format may changes. Make sure you know what you are doing before using this library.
 
 ## Construction
