@@ -3,7 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/sparse-merkle-tree.svg)](https://crates.io/crates/sparse-merkle-tree)
 [Docs](https://docs.rs/sparse-merkle-tree)
 
-A construction optimized sparse merkle tree.
+An optimized sparse merkle tree.
 
 | size | proof size | update | get | merkle proof | verify proof |
 | --- | --- | --- | --- | --- | --- |
@@ -14,6 +14,8 @@ Features:
 * Generate / Verify multi-leaves merkle proof
 * Customize hash function
 * Rust `no_std` support
+
+This article describes details of the tree [An optimized compacted sparse merkle tree](https://justjjy.com/An-optimized-compact-sparse-merkle-tree)
 
 **Notice** this library is not stable yet; API and proof format may changes. Make sure you know what you are doing before using this library.
 
