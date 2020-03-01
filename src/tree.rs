@@ -1,52 +1,15 @@
 use crate::{
     collections::{BTreeMap, VecDeque},
     error::{Error, Result},
-    hasher::Hasher,
-    store::{Entry, Store},
+    traits::{Hasher, Store, Value},
     vec::Vec,
     H256,
 };
-use core::{
-    cmp::{max, Ordering},
-    marker::PhantomData,
-};
+use core::{cmp::max, marker::PhantomData};
 
 /// log2(256) * 2
 pub const EXPECTED_PATH_SIZE: usize = 16;
 const TREE_HEIGHT: usize = 256;
-
-#[derive(Debug, Hash, Ord, Eq, PartialEq)]
-pub enum Key {
-    Node(H256),
-    Leaf(H256),
-}
-
-impl Key {
-    pub fn inner(&self) -> &H256 {
-        match self {
-            Key::Node(inner) => inner,
-            Key::Leaf(inner) => inner,
-        }
-    }
-
-    fn type_id(&self) -> usize {
-        match self {
-            Key::Node(_) => 0,
-            Key::Leaf(_) => 1,
-        }
-    }
-}
-
-impl PartialOrd for Key {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        let self_type = self.type_id();
-        let other_type = other.type_id();
-        if self_type != other_type {
-            return self_type.partial_cmp(&other_type);
-        }
-        self.inner().partial_cmp(other.inner())
-    }
-}
 
 /// A branch in the SMT
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -70,36 +33,9 @@ impl BranchNode {
 
 /// A leaf in the SMT
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub struct LeafNode {
+pub struct LeafNode<V> {
     pub key: H256,
-    pub value: H256,
-}
-
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum Node {
-    Branch(BranchNode),
-    Leaf(LeafNode),
-}
-
-impl Node {
-    fn branch(self) -> Option<BranchNode> {
-        match self {
-            Node::Branch(n) => Some(n),
-            _ => None,
-        }
-    }
-    fn branch_ref(&self) -> Option<&BranchNode> {
-        match self {
-            Node::Branch(n) => Some(n),
-            _ => None,
-        }
-    }
-    fn leaf_ref(&self) -> Option<&LeafNode> {
-        match self {
-            Node::Leaf(n) => Some(n),
-            _ => None,
-        }
-    }
+    pub value: V,
 }
 
 /// Merge two hash
@@ -131,15 +67,15 @@ fn hash_leaf<H: Hasher + Default>(key: &H256, value: &H256) -> H256 {
 
 /// Sparse merkle tree
 #[derive(Default, Debug)]
-pub struct SparseMerkleTree<H> {
-    store: Store,
+pub struct SparseMerkleTree<H, V, S> {
+    store: S,
     root: H256,
-    phantom: PhantomData<H>,
+    phantom: PhantomData<(H, V)>,
 }
 
-impl<H: Hasher + Default> SparseMerkleTree<H> {
+impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
     /// Build a merkle tree from root and store
-    pub fn new(root: H256, store: Store) -> SparseMerkleTree<H> {
+    pub fn new(root: H256, store: S) -> SparseMerkleTree<H, V, S> {
         SparseMerkleTree {
             root,
             store,
@@ -157,22 +93,18 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
     }
 
     /// Get backend store
-    pub fn store(&self) -> &Store {
+    pub fn store(&self) -> &S {
         &self.store
     }
 
     /// Update a leaf, return new merkle root
-    /// set a key to zero to delete the key
-    pub fn update(&mut self, key: H256, value: H256) -> Result<&H256> {
+    /// set to zero value to delete a key
+    pub fn update(&mut self, key: H256, value: V) -> Result<&H256> {
         // store the path, sparse index will ignore zero members
         let mut path: BTreeMap<_, _> = Default::default();
         // walk path from top to bottom
         let mut node = self.root;
-        let mut branch = self
-            .store
-            .get(&Key::Node(node))
-            .map(Clone::clone)
-            .and_then(|n| n.branch());
+        let mut branch = self.store.get_branch(&node)?;
         let mut height = branch
             .as_ref()
             .map(|b| max(b.key.fork_height(&key), b.fork_height))
@@ -188,7 +120,7 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
             }
             // branch node is parent if height is less than branch_node's height
             // remove it from store
-            self.store.remove(&Key::Node(node));
+            self.store.remove_branch(&node)?;
             let (left, right) = branch_node.branch(height);
             let is_right = key.get_bit(height);
             let sibling;
@@ -207,39 +139,34 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
             }
             path.insert(height, sibling);
             // get next branch and fork_height
-            branch = self
-                .store
-                .get(&Key::Node(node))
-                .map(Clone::clone)
-                .and_then(|n| n.branch());
+            branch = self.store.get_branch(&node)?;
             if let Some(branch_node) = branch.as_ref() {
                 height = max(key.fork_height(&branch_node.key), branch_node.fork_height);
             }
         }
         // delete previous leaf
-        if let Entry::Occupied(entry) = self.store.entry(Key::Leaf(node)) {
-            if entry.get().leaf_ref().map(|leaf| &leaf.key) == Some(&key) {
-                entry.remove();
+        if let Some(leaf) = self.store.get_leaf(&node)? {
+            if leaf.key == key {
+                self.store.remove_leaf(&node)?;
             }
         }
 
         // compute and store new leaf
-        let mut node = hash_leaf::<H>(&key, &value);
+        let mut node = hash_leaf::<H>(&key, &value.to_h256());
         // notice when value is zero the leaf is deleted, so we do not need to store it
         if !node.is_zero() {
-            self.store
-                .insert(Key::Leaf(node), Node::Leaf(LeafNode { key, value }));
+            self.store.insert_leaf(node, LeafNode { key, value })?;
         }
         // build at least one branch for leaf
-        self.store.insert(
-            Key::Node(node),
-            Node::Branch(BranchNode {
+        self.store.insert_branch(
+            node,
+            BranchNode {
                 key,
                 fork_height: 0,
                 node,
                 sibling: H256::zero(),
-            }),
-        );
+            },
+        )?;
 
         // recompute the tree from bottom to top
         while !path.is_empty() {
@@ -260,8 +187,7 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
                 node,
                 key,
             };
-            self.store
-                .insert(Key::Node(parent), Node::Branch(branch_node));
+            self.store.insert_branch(parent, branch_node)?;
             node = parent;
         }
         self.root = node;
@@ -269,16 +195,12 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
     }
 
     /// Get value of a leaf
-    pub fn get(&self, key: &H256) -> Result<&H256> {
-        const ZERO: H256 = H256::zero();
-        let mut node = &self.root;
+    /// return zero value if leaf not exists
+    pub fn get(&self, key: &H256) -> Result<V> {
+        let mut node = self.root;
         // children must equals to zero when parent equals to zero
         while !node.is_zero() {
-            let branch_node = match self
-                .store
-                .get(&Key::Node(*node))
-                .and_then(|n| n.branch_ref())
-            {
+            let branch_node = match self.store.get_branch(&node)? {
                 Some(branch_node) => branch_node,
                 None => {
                     break;
@@ -287,9 +209,9 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
             let is_right = key.get_bit(branch_node.fork_height as u8);
             let (left, right) = branch_node.branch(branch_node.fork_height as u8);
             if is_right {
-                node = right;
+                node = *right;
             } else {
-                node = left;
+                node = *left;
             }
             if branch_node.fork_height == 0 {
                 break;
@@ -298,12 +220,12 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
 
         // return zero is leaf_key is zero
         if node.is_zero() {
-            return Ok(&ZERO);
+            return Ok(V::zero());
         }
         // get leaf node
-        match self.store.get(&Key::Leaf(*node)).and_then(|n| n.leaf_ref()) {
-            Some(leaf) if &leaf.key == key => Ok(&leaf.value),
-            _ => Ok(&ZERO),
+        match self.store.get_leaf(&node)? {
+            Some(leaf) if &leaf.key == key => Ok(leaf.value),
+            _ => Ok(V::zero()),
         }
     }
 
@@ -317,8 +239,7 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
         let mut node = self.root;
         let mut height = self
             .store
-            .get(&Key::Node(node))
-            .and_then(|n| n.branch_ref())
+            .get_branch(&node)?
             .map(|b| max(b.key.fork_height(&key), b.fork_height))
             .unwrap_or(0);
         while !node.is_zero() {
@@ -326,11 +247,7 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
             if node.is_zero() {
                 break;
             }
-            match self
-                .store
-                .get(&Key::Node(node))
-                .and_then(|n| n.branch_ref())
-            {
+            match self.store.get_branch(&node)? {
                 Some(branch_node) => {
                     if height <= branch_node.fork_height {
                         // node is child
@@ -375,11 +292,7 @@ impl<H: Hasher + Default> SparseMerkleTree<H> {
                         sibling_key.set_bit(height as u8);
                     };
                     cache.insert((height as usize, sibling_key), sibling);
-                    if let Some(branch_node) = self
-                        .store
-                        .get(&Key::Node(node))
-                        .and_then(|n| n.branch_ref())
-                    {
+                    if let Some(branch_node) = self.store.get_branch(&node)? {
                         let fork_height =
                             max(key.fork_height(&branch_node.key), branch_node.fork_height);
                         height = fork_height;

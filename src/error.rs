@@ -1,4 +1,4 @@
-use crate::H256;
+use crate::{string, H256};
 
 pub type Result<T> = ::core::result::Result<T, Error>;
 
@@ -10,6 +10,7 @@ pub enum Error {
     EmptyKeys,
     EmptyTree,
     IncorrectNumberOfLeaves { expected: usize, actual: usize },
+    Store(string::String),
 }
 
 impl core::fmt::Display for Error {
@@ -36,6 +37,9 @@ impl core::fmt::Display for Error {
                     "Incorrect number of leaves, expected {} actual {}",
                     expected, actual
                 )?;
+            }
+            Error::Store(err_msg) => {
+                write!(f, "Backend store error: {}", err_msg)?;
             }
         }
         Ok(())
