@@ -2,7 +2,7 @@ use crate::{string, H256};
 
 pub type Result<T> = ::core::result::Result<T, Error>;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     MissingKey(usize, H256),
     CorruptedProof,

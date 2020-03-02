@@ -1,6 +1,9 @@
 use super::*;
 use crate::{
-    blake2b::Blake2bHasher, default_store::DefaultStore, error::Error, tree::SparseMerkleTree,
+    blake2b::Blake2bHasher,
+    default_store::DefaultStore,
+    error::Error,
+    tree::{MerkleProof, SparseMerkleTree},
 };
 use proptest::prelude::*;
 
@@ -27,11 +30,30 @@ fn test_default_root() {
 }
 
 #[test]
-fn test_default_merkle_proof() {
+fn test_default_tree() {
     let tree = SMT::default();
     let proof_result = tree.merkle_proof(vec![H256::zero()]);
     assert_eq!(proof_result.unwrap_err(), Error::EmptyTree);
     assert_eq!(tree.get(&H256::zero()).expect("get"), H256::zero());
+}
+
+#[test]
+fn test_default_merkle_proof() {
+    let proof = MerkleProof::new(Default::default(), Default::default());
+    let result = proof.compute_root::<Blake2bHasher>(vec![([42u8; 32].into(), [42u8; 32].into())]);
+    assert_eq!(
+        result.unwrap_err(),
+        Error::IncorrectNumberOfLeaves {
+            expected: 0,
+            actual: 1
+        }
+    );
+    // makes room for leaves
+    let proof = MerkleProof::new(vec![Vec::new()], Default::default());
+    let root = proof
+        .compute_root::<Blake2bHasher>(vec![([42u8; 32].into(), [42u8; 32].into())])
+        .expect("compute root");
+    assert_ne!(root, H256::zero());
 }
 
 fn test_construct(key: H256, value: H256) {
