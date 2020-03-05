@@ -32,9 +32,17 @@ fn test_default_root() {
 #[test]
 fn test_default_tree() {
     let tree = SMT::default();
-    let proof_result = tree.merkle_proof(vec![H256::zero()]);
-    assert_eq!(proof_result.unwrap_err(), Error::EmptyTree);
     assert_eq!(tree.get(&H256::zero()).expect("get"), H256::zero());
+    let proof = tree.merkle_proof(vec![H256::zero()]).expect("merkle proof");
+    let root = proof
+        .compute_root::<Blake2bHasher>(vec![(H256::zero(), H256::zero())])
+        .expect("root");
+    assert_eq!(&root, tree.root());
+    let proof = tree.merkle_proof(vec![H256::zero()]).expect("merkle proof");
+    let root2 = proof
+        .compute_root::<Blake2bHasher>(vec![(H256::zero(), [42u8; 32].into())])
+        .expect("root");
+    assert_ne!(&root2, tree.root());
 }
 
 #[test]
@@ -234,13 +242,9 @@ proptest! {
     fn test_smt_non_exists_leaves((pairs, _n) in leaves(1, 20), (pairs2, _n2) in leaves(1, 5)){
         let smt = new_smt(pairs);
         let non_exists_keys: Vec<_> = pairs2.into_iter().map(|(k, _v)|k).collect();
-        if smt.is_empty() {
-            assert_eq!(smt.merkle_proof(non_exists_keys).unwrap_err(), Error::EmptyTree);
-        } else {
-            let proof = smt.merkle_proof(non_exists_keys.clone()).expect("gen proof");
-            assert!(proof.verify::<Blake2bHasher>(smt.root(),
-                non_exists_keys.into_iter().map(|k|(k, H256::zero())).collect()).expect("verify proof"));
-        }
+        let proof = smt.merkle_proof(non_exists_keys.clone()).expect("gen proof");
+        assert!(proof.verify::<Blake2bHasher>(smt.root(),
+            non_exists_keys.into_iter().map(|k|(k, H256::zero())).collect()).expect("verify proof"));
     }
 
     #[test]
@@ -248,17 +252,13 @@ proptest! {
         let smt = new_smt(pairs.clone());
         let exists_keys: Vec<_> = pairs.into_iter().map(|(k, _v)|k).collect();
         let non_exists_keys: Vec<_> = pairs2.into_iter().map(|(k, _v)|k).collect();
-        if smt.is_empty() {
-            assert_eq!(smt.merkle_proof(non_exists_keys).unwrap_err(), Error::EmptyTree);
-        } else {
-            let exists_keys_len = std::cmp::max(exists_keys.len() / 2, 1);
-            let non_exists_keys_len = std::cmp::max(non_exists_keys.len() / 2, 1);
-            let mut keys: Vec<_> = exists_keys.into_iter().take(exists_keys_len).chain(non_exists_keys.into_iter().take(non_exists_keys_len)).collect();
-            keys.dedup();
-            let proof = smt.merkle_proof(keys.clone()).expect("gen proof");
-            assert!(proof.verify::<Blake2bHasher>(smt.root(),
-                keys.into_iter().map(|k|(k, smt.get(&k).expect("get"))).collect()).expect("verify proof"));
-        }
+        let exists_keys_len = std::cmp::max(exists_keys.len() / 2, 1);
+        let non_exists_keys_len = std::cmp::max(non_exists_keys.len() / 2, 1);
+        let mut keys: Vec<_> = exists_keys.into_iter().take(exists_keys_len).chain(non_exists_keys.into_iter().take(non_exists_keys_len)).collect();
+        keys.dedup();
+        let proof = smt.merkle_proof(keys.clone()).expect("gen proof");
+        assert!(proof.verify::<Blake2bHasher>(smt.root(),
+            keys.into_iter().map(|k|(k, smt.get(&k).expect("get"))).collect()).expect("verify proof"));
     }
 
     #[test]

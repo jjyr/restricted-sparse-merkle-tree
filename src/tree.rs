@@ -310,10 +310,6 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
             return Err(Error::EmptyKeys);
         }
 
-        if self.root.is_zero() {
-            return Err(Error::EmptyTree);
-        }
-
         // sort keys
         keys.sort_unstable();
 

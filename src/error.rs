@@ -8,7 +8,6 @@ pub enum Error {
     CorruptedProof,
     EmptyProof,
     EmptyKeys,
-    EmptyTree,
     IncorrectNumberOfLeaves { expected: usize, actual: usize },
     Store(string::String),
 }
@@ -27,9 +26,6 @@ impl core::fmt::Display for Error {
             }
             Error::EmptyKeys => {
                 write!(f, "Empty keys")?;
-            }
-            Error::EmptyTree => {
-                write!(f, "Empty tree")?;
             }
             Error::IncorrectNumberOfLeaves { expected, actual } => {
                 write!(
