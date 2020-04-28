@@ -1,9 +1,7 @@
 use super::*;
 use crate::{
-    blake2b::Blake2bHasher,
-    default_store::DefaultStore,
-    error::Error,
-    tree::{MerkleProof, SparseMerkleTree},
+    blake2b::Blake2bHasher, default_store::DefaultStore, error::Error, MerkleProof,
+    SparseMerkleTree,
 };
 use proptest::prelude::*;
 
