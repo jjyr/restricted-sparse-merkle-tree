@@ -10,6 +10,10 @@ pub enum Error {
     EmptyKeys,
     IncorrectNumberOfLeaves { expected: usize, actual: usize },
     Store(string::String),
+    CorruptedStack,
+    NonSiblings,
+    InvalidCode(u8),
+    NonMergableRange,
 }
 
 impl core::fmt::Display for Error {
@@ -36,6 +40,18 @@ impl core::fmt::Display for Error {
             }
             Error::Store(err_msg) => {
                 write!(f, "Backend store error: {}", err_msg)?;
+            }
+            Error::CorruptedStack => {
+                write!(f, "Corrupted compiled proof stack")?;
+            }
+            Error::NonSiblings => {
+                write!(f, "Merging non-siblings in compiled stack")?;
+            }
+            Error::InvalidCode(code) => {
+                write!(f, "Invalid compiled proof code: {}", code)?;
+            }
+            Error::NonMergableRange => {
+                write!(f, "Ranges can not be merged")?;
             }
         }
         Ok(())
