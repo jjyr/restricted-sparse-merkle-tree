@@ -700,7 +700,7 @@ impl CompiledMerkleProof {
                 }
                 // P
                 0x50 => {
-                    if stack.len() < 1 {
+                    if stack.is_empty() {
                         return Err(Error::CorruptedStack);
                     }
                     if program_index + 33 > self.0.len() {
@@ -737,7 +737,7 @@ impl CompiledMerkleProof {
                     let parent_key_b = key_b.copy_bits(height..);
                     let a_set = key_a.get_bit(height);
                     let b_set = key_b.get_bit(height);
-                    let mut sibling_key_a = parent_key_a.clone();
+                    let mut sibling_key_a = parent_key_a;
                     if !a_set {
                         sibling_key_a.set_bit(height);
                     }
