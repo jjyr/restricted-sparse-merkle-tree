@@ -611,8 +611,10 @@ impl MerkleProof {
 }
 
 fn leaf_program(leaf_index: usize) -> (Vec<u8>, Option<Range>) {
+    let mut program = Vec::with_capacity(1);
+    program.push(0x4C);
     (
-        vec![0x4C],
+        program,
         Some(Range {
             start: leaf_index,
             end: leaf_index + 1,
@@ -626,7 +628,8 @@ fn proof_program(
     height: u8,
 ) -> (Vec<u8>, Option<Range>) {
     let (child_program, child_range) = child;
-    let mut program = vec![0x50; 34 + child_program.len()];
+    let mut program = Vec::new();
+    program.resize(34 + child_program.len(), 0x50);
     program[..child_program.len()].copy_from_slice(child_program);
     program[child_program.len() + 1] = height;
     program[child_program.len() + 2..].copy_from_slice(proof.as_slice());
@@ -660,7 +663,8 @@ fn merge_program(
             return Err(Error::NonMergableRange);
         }
     };
-    let mut program = vec![0x48; 2 + a_program.len() + b_program.len()];
+    let mut program = Vec::new();
+    program.resize(2 + a_program.len() + b_program.len(), 0x48);
     if a_comes_first {
         program[..a_program.len()].copy_from_slice(a_program);
         program[a_program.len()..a_program.len() + b_program.len()].copy_from_slice(b_program);
@@ -680,7 +684,7 @@ impl CompiledMerkleProof {
         leaves.sort_unstable_by_key(|(k, _v)| *k);
         let mut program_index = 0;
         let mut leave_index = 0;
-        let mut stack = vec![];
+        let mut stack = Vec::new();
         while program_index < self.0.len() {
             let code = self.0[program_index];
             program_index += 1;
