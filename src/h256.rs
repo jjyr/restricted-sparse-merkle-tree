@@ -109,20 +109,20 @@ impl H256 {
 
 impl PartialOrd for H256 {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        // H256 is little endian
-        for i in (0..self.0.len()).rev() {
-            let o = self.0[i].partial_cmp(&other.0[i]);
-            if o != Some(Ordering::Equal) {
-                return o;
-            }
-        }
-        Some(Ordering::Equal)
+        Some(self.cmp(other))
     }
 }
 
 impl Ord for H256 {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).expect("partial cmp")
+        // Compare bits from heigher to lower (255..0)
+        for i in (0..32).rev() {
+            match self.0[i].cmp(&other.0[i]) {
+                Ordering::Equal => (),
+                o => return o,
+            }
+        }
+        Ordering::Equal
     }
 }
 
