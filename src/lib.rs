@@ -37,7 +37,7 @@
 //!     Blake2bBuilder::new(32).personal(b"SMT").build()
 //! }
 //!
-//! fn main() {
+//! fn construct_smt() {
 //!     let mut tree = SMT::default();  
 //!     for (i, word) in "The quick brown fox jumps over the lazy dog"
 //!         .split_whitespace()
