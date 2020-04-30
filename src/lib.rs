@@ -4,14 +4,16 @@
 //!
 //! ```
 //! use sparse_merkle_tree::{
-//!     blake2b::Blake2bHasher, default_store::DefaultStore, error::Error, MerkleProof,
+//!     blake2b::Blake2bHasher, default_store::DefaultStore,
+//!     error::Error, MerkleProof,
 //!     SparseMerkleTree, traits::Value, H256
 //! };
 //! use blake2b_rs::{Blake2b, Blake2bBuilder};
 //!
-//! fn new_blake2b() -> Blake2b {
-//!     Blake2bBuilder::new(32).personal(b"SMT").build()
-//! }
+//! // define SMT
+//! type SMT = SparseMerkleTree<Blake2bHasher, Word, DefaultStore<Word>>;
+//!
+//! // define SMT value
 //! #[derive(Default, Clone)]
 //! pub struct Word(String);
 //! impl Value for Word {
@@ -30,7 +32,10 @@
 //!    }
 //! }
 //!
-//! type SMT = SparseMerkleTree<Blake2bHasher, Word, DefaultStore<Word>>;
+//! // helper function
+//! fn new_blake2b() -> Blake2b {
+//!     Blake2bBuilder::new(32).personal(b"SMT").build()
+//! }
 //!
 //! fn main() {
 //!     let mut tree = SMT::default();  
@@ -46,6 +51,7 @@
 //!             buf.into()
 //!         };
 //!         let value = Word(word.to_string());
+//!         // insert key value into tree
 //!         tree.update(key, value).expect("update");
 //!     }
 //!
