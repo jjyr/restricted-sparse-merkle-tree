@@ -44,6 +44,7 @@ impl MerkleProof {
         &self.proof
     }
 
+    /// convert merkle proof into CompiledMerkleProof
     pub fn compile(self, mut leaves: Vec<(H256, H256)>) -> Result<CompiledMerkleProof> {
         if leaves.is_empty() {
             return Err(Error::EmptyKeys);
@@ -291,6 +292,7 @@ fn merge_program(
     Ok((program, Some(range)))
 }
 
+/// An structure optimized for verify merkle proof
 #[derive(Debug, Clone)]
 pub struct CompiledMerkleProof(pub Vec<u8>);
 

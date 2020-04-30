@@ -59,6 +59,7 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
         &self.root
     }
 
+    /// Check empty of the tree
     pub fn is_empty(&self) -> bool {
         self.root.is_zero()
     }

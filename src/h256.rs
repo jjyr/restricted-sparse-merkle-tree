@@ -1,4 +1,6 @@
 use core::cmp::Ordering;
+
+/// Represent 256 bits
 #[derive(Eq, PartialEq, Debug, Default, Hash, Clone, Copy)]
 pub struct H256([u8; 32]);
 
@@ -40,6 +42,8 @@ impl H256 {
         &self.0[..]
     }
 
+    /// Treat H256 as a path in a tree
+    /// fork height is the number of common bits(from heigher to lower: 255..=0) of two H256
     pub fn fork_height(&self, key: &H256) -> u8 {
         for h in (0..=core::u8::MAX).rev() {
             if self.get_bit(h) != key.get_bit(h) {
@@ -49,6 +53,8 @@ impl H256 {
         0
     }
 
+    /// Treat H256 as a path in a tree
+    /// return parent_path of self
     pub fn parent_path(&self, height: u8) -> Self {
         height
             .checked_add(1)
@@ -56,7 +62,7 @@ impl H256 {
             .unwrap_or_else(H256::zero)
     }
 
-    /// Copy bits to a new H256
+    /// Copy bits and return a new H256
     pub fn copy_bits(&self, range: impl core::ops::RangeBounds<u8>) -> Self {
         const MAX: usize = 256;
         const BYTE: usize = 8;
