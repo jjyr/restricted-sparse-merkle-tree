@@ -116,13 +116,7 @@ impl PartialOrd for H256 {
 impl Ord for H256 {
     fn cmp(&self, other: &Self) -> Ordering {
         // Compare bits from heigher to lower (255..0)
-        for i in (0..32).rev() {
-            match self.0[i].cmp(&other.0[i]) {
-                Ordering::Equal => (),
-                o => return o,
-            }
-        }
-        Ordering::Equal
+        self.0.iter().rev().cmp(other.0.iter().rev())
     }
 }
 
