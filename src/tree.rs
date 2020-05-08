@@ -69,6 +69,11 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
         &self.store
     }
 
+    /// Get mutable backend store
+    pub fn store_mut(&mut self) -> &mut S {
+        &mut self.store
+    }
+
     /// Update a leaf, return new merkle root
     /// set to zero value to delete a key
     pub fn update(&mut self, key: H256, value: V) -> Result<&H256> {
