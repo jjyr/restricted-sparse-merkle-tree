@@ -19,6 +19,10 @@ impl<V> DefaultStore<V> {
     pub fn leaves_map(&self) -> &Map<H256, LeafNode<V>> {
         &self.leaves_map
     }
+    pub fn clear(&mut self) {
+        self.branches_map.clear();
+        self.leaves_map.clear();
+    }
 }
 
 impl<V: Clone> Store<V> for DefaultStore<V> {
