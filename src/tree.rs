@@ -69,6 +69,17 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
         &self.store
     }
 
+    /// Clear all items from a tree
+    pub fn clear(&mut self) -> Result<()> {
+        // Collect all keys first before deleting them to prevent and potential
+        // disorder in store.
+        let keys: Vec<H256> = self.store.leaf_iter()?.map(|node| node.key).collect();
+        for key in keys {
+            self.update(key, V::zero())?;
+        }
+        Ok(())
+    }
+
     /// Update a leaf, return new merkle root
     /// set to zero value to delete a key
     pub fn update(&mut self, key: H256, value: V) -> Result<&H256> {

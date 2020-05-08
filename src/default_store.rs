@@ -22,6 +22,9 @@ impl<V> DefaultStore<V> {
 }
 
 impl<V: Clone> Store<V> for DefaultStore<V> {
+    fn leaf_iter<'a>(&'a self) -> Result<Box<dyn Iterator<Item = &LeafNode<V>> + 'a>, Error> {
+        Ok(Box::new(self.leaves_map.values()))
+    }
     fn get_branch(&self, node: &H256) -> Result<Option<BranchNode>, Error> {
         Ok(self.branches_map.get(node).map(Clone::clone))
     }

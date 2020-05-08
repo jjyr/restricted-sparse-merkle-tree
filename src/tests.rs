@@ -324,4 +324,11 @@ proptest! {
             assert_eq!(smt.get(&k), Ok(v));
         }
     }
+
+    #[test]
+    fn test_clear_smt_tree((pairs, _) in leaves(1, 20)) {
+        let mut smt = new_smt(pairs.clone());
+        smt.clear().expect("clear");
+        assert_eq!(smt.root(), &H256::zero());
+    }
 }
