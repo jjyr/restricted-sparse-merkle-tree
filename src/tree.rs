@@ -64,6 +64,11 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
         self.root.is_zero()
     }
 
+    /// Destroy current tree and retake store
+    pub fn take_store(self) -> S {
+        self.store
+    }
+
     /// Get backend store
     pub fn store(&self) -> &S {
         &self.store
