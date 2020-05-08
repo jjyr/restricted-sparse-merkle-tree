@@ -1,7 +1,7 @@
 use crate::{
     collections,
     error::Error,
-    traits::Store,
+    traits::{Box, Store},
     tree::{BranchNode, LeafNode},
     H256,
 };

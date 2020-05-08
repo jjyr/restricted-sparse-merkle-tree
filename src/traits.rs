@@ -35,3 +35,11 @@ pub trait Store<V> {
     fn remove_branch(&mut self, node: &H256) -> Result<(), Error>;
     fn remove_leaf(&mut self, leaf_hash: &H256) -> Result<(), Error>;
 }
+
+cfg_if::cfg_if! {
+    if #[cfg(feature = "std")] {
+        pub type Box<T> = std::boxed::Box<T>;
+    } else {
+        pub type Box<T> = alloc::boxed::Box<T>;
+    }
+}
