@@ -138,17 +138,18 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
         // notice when value is zero the leaf is deleted, so we do not need to store it
         if !node.is_zero() {
             self.store.insert_leaf(node, LeafNode { key, value })?;
-        }
-        // build at least one branch for leaf
-        self.store.insert_branch(
-            node,
-            BranchNode {
-                key,
-                fork_height: 0,
+
+            // build at least one branch for leaf
+            self.store.insert_branch(
                 node,
-                sibling: H256::zero(),
-            },
-        )?;
+                BranchNode {
+                    key,
+                    fork_height: 0,
+                    node,
+                    sibling: H256::zero(),
+                },
+            )?;
+        }
 
         // recompute the tree from bottom to top
         while !path.is_empty() {
@@ -163,13 +164,16 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
                 merge::<H>(&node, &sibling)
             };
 
-            let branch_node = BranchNode {
-                fork_height: height as u8,
-                sibling,
-                node,
-                key,
-            };
-            self.store.insert_branch(parent, branch_node)?;
+            if !node.is_zero() {
+                let branch_node = BranchNode {
+                    fork_height: height as u8,
+                    sibling,
+                    node,
+                    key,
+                };
+                self.store.insert_branch(parent, branch_node)?;
+            }
+
             node = parent;
         }
         self.root = node;

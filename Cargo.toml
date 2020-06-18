@@ -22,6 +22,7 @@ blake2b-rs = { version = "0.1", optional = true }
 proptest = "0.9"
 criterion = "0.2"
 rand = "0.7"
+hex = "0.4"
 
 [[bench]]
 name = "smt_benchmark"

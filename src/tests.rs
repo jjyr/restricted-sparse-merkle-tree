@@ -4,6 +4,7 @@ use crate::{
     SparseMerkleTree,
 };
 use proptest::prelude::*;
+use rand::prelude::SliceRandom;
 
 type SMT = SparseMerkleTree<Blake2bHasher, H256, DefaultStore<H256>>;
 
@@ -97,6 +98,95 @@ fn test_merkle_root() {
     .into();
     assert_eq!(tree.store().leaves_map().len(), 9);
     assert_eq!(tree.root(), &expected_root);
+}
+
+#[test]
+fn test_zero_value_donot_change_root() {
+    let mut tree = SMT::default();
+    let key = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 1,
+    ]
+    .into();
+    let value = H256::zero();
+    tree.update(key, value).unwrap();
+    assert_eq!(tree.root(), &H256::zero());
+    assert_eq!(tree.store().leaves_map().len(), 0);
+    assert_eq!(tree.store().branches_map().len(), 0);
+}
+
+#[test]
+fn test_zero_value_donot_change_store() {
+    let mut tree = SMT::default();
+    let key = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0,
+    ]
+    .into();
+    let value = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 1,
+    ]
+    .into();
+    tree.update(key, value).unwrap();
+    assert_ne!(tree.root(), &H256::zero());
+    let root = *tree.root();
+    let store = tree.store().clone();
+
+    // insert a zero value leaf
+    let key = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 1,
+    ]
+    .into();
+    let value = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0,
+    ]
+    .into();
+    tree.update(key, value).unwrap();
+    assert_eq!(tree.root(), &root);
+    assert_eq!(tree.store().leaves_map(), store.leaves_map());
+    assert_eq!(tree.store().branches_map(), store.branches_map());
+}
+
+#[test]
+fn test_delete_a_leaf() {
+    let mut tree = SMT::default();
+    let key = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0,
+    ]
+    .into();
+    let value = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 1,
+    ]
+    .into();
+    tree.update(key, value).unwrap();
+    assert_ne!(tree.root(), &H256::zero());
+    let root = *tree.root();
+    let store = tree.store().clone();
+
+    // insert a leaf
+    let key = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 1,
+    ]
+    .into();
+    let value = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 1,
+    ]
+    .into();
+    tree.update(key, value).unwrap();
+    assert_ne!(tree.root(), &root);
+
+    // delete a leaf
+    tree.update(key, H256::zero()).unwrap();
+    assert_eq!(tree.root(), &root);
+    assert_eq!(tree.store().leaves_map(), store.leaves_map());
+    assert_eq!(tree.store().branches_map(), store.branches_map());
 }
 
 fn test_construct(key: H256, value: H256) {
@@ -323,5 +413,80 @@ proptest! {
         for (k, v) in pairs.into_iter().take(n) {
             assert_eq!(smt.get(&k), Ok(v));
         }
+    }
+
+    #[test]
+    fn test_smt_random_insert_order((pairs, _n) in leaves(5, 30)){
+        let smt = new_smt(pairs.clone());
+        let root = *smt.root();
+
+        let mut pairs = pairs;
+        let mut rng = rand::thread_rng();
+        for _i in 0..10 {
+            pairs.shuffle(&mut rng);
+            let smt = new_smt(pairs.clone());
+            let current_root = *smt.root();
+            assert_eq!(root, current_root);
+        }
+    }
+
+}
+
+#[test]
+fn test_v0_2_broken_sample() {
+    fn parse_h256(s: &str) -> H256 {
+        let data = hex::decode(s).unwrap();
+        let mut inner = [0u8; 32];
+        inner.copy_from_slice(&data);
+        H256::from(inner)
+    }
+
+    let keys = vec![
+        "0000000000000000000000000000000000000000000000000000000000000000",
+        "0000000000000000000000000000000000000000000000000000000000000002",
+        "0000000000000000000000000000000000000000000000000000000000000003",
+        "0000000000000000000000000000000000000000000000000000000000000004",
+        "0000000000000000000000000000000000000000000000000000000000000005",
+        "0000000000000000000000000000000000000000000000000000000000000006",
+        "000000000000000000000000000000000000000000000000000000000000000e",
+        "f652222313e28459528d920b65115c16c04f3efc82aaedc97be59f3f377c0d3f",
+        "f652222313e28459528d920b65115c16c04f3efc82aaedc97be59f3f377c0d40",
+        "5eff886ea0ce6ca488a3d6e336d6c0f75f46d19b42c06ce5ee98e42c96d256c7",
+        "6d5257204ebe7d88fd91ae87941cb2dd9d8062b64ae5a2bd2d28ec40b9fbf6df",
+    ]
+    .into_iter()
+    .map(parse_h256)
+    .collect::<Vec<_>>();
+    let values = vec![
+        "000000000000000000000000c8328aabcd9b9e8e64fbc566c4385c3bdeb219d7",
+        "000000000000000000000001c8328aabcd9b9e8e64fbc566c4385c3bdeb219d7",
+        "0000384000001c2000000e1000000708000002580000012c000000780000003c",
+        "000000000000000000093a80000546000002a300000151800000e10000007080",
+        "000000000000000000000000000000000000000000000000000000000000000f",
+        "0000000000000000000000000000000000000000000000000000000000000001",
+        "00000000000000000000000000000000000000000000000000071afd498d0000",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0000000000000000000000000000000000000000000000000000000000000000",
+        "0000000000000000000000000000000000000000000000000000000000000001",
+        "0000000000000000000000000000000000000000000000000000000000000000",
+    ]
+    .into_iter()
+    .map(parse_h256)
+    .collect::<Vec<_>>();
+    let mut pairs = keys
+        .clone()
+        .into_iter()
+        .zip(values.into_iter())
+        .collect::<Vec<_>>();
+    let smt = new_smt(pairs.clone());
+    let base_root = *smt.root();
+
+    // insert in random order
+    let mut rng = rand::thread_rng();
+    for _i in 0..10 {
+        pairs.shuffle(&mut rng);
+        let smt = new_smt(pairs.clone());
+        let current_root = *smt.root();
+        assert_eq!(base_root, current_root);
     }
 }
