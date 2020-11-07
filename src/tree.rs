@@ -96,13 +96,15 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
             let branch_node = branch.unwrap();
             let fork_height = max(key.fork_height(&branch_node.key), branch_node.fork_height);
             if height > branch_node.fork_height {
-                // branch node is a sibling
+                // the merge height is higher than node, so we do not need to remove node's branch
                 path.insert(fork_height, node);
                 break;
             }
             // branch node is parent if height is less than branch_node's height
             // remove it from store
-            self.store.remove_branch(&node)?;
+            if branch_node.fork_height > 0 {
+                self.store.remove_branch(&node)?;
+            }
             let (left, right) = branch_node.branch(height);
             let is_right = key.get_bit(height);
             let sibling;
@@ -130,6 +132,7 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
         if let Some(leaf) = self.store.get_leaf(&node)? {
             if leaf.key == key {
                 self.store.remove_leaf(&node)?;
+                self.store.remove_branch(&node)?;
             }
         }
 
@@ -165,6 +168,7 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
             };
 
             if !node.is_zero() {
+                // node is exists
                 let branch_node = BranchNode {
                     fork_height: height as u8,
                     sibling,
@@ -173,7 +177,6 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
                 };
                 self.store.insert_branch(parent, branch_node)?;
             }
-
             node = parent;
         }
         self.root = node;

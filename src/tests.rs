@@ -4,7 +4,7 @@ use crate::{
     SparseMerkleTree,
 };
 use proptest::prelude::*;
-use rand::prelude::SliceRandom;
+use rand::prelude::{Rng, SliceRandom};
 
 type SMT = SparseMerkleTree<Blake2bHasher, H256, DefaultStore<H256>>;
 
@@ -430,6 +430,26 @@ proptest! {
         }
     }
 
+    #[test]
+    fn test_smt_update_with_zero_values((pairs, _n) in leaves(5, 30)){
+        let mut rng = rand::thread_rng();
+        let len =  rng.gen_range(0, pairs.len());
+        let mut smt = new_smt(pairs[..len].to_vec());
+        let root = *smt.root();
+
+        // insert zero values
+        for (k, _v) in pairs[len..].iter() {
+            smt.update(*k, H256::zero()).unwrap();
+        }
+        // check root
+        let current_root = *smt.root();
+        assert_eq!(root, current_root);
+        // check inserted pairs
+        for (k, v) in pairs[..len].iter() {
+            let value = smt.get(k).unwrap();
+            assert_eq!(v, &value);
+        }
+    }
 }
 
 #[test]
@@ -489,4 +509,42 @@ fn test_v0_2_broken_sample() {
         let current_root = *smt.root();
         assert_eq!(base_root, current_root);
     }
+}
+
+#[test]
+fn test_v0_3_broken_sample() {
+    let k1 = [
+        0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0,
+    ];
+    let v1 = [
+        108, 153, 9, 238, 15, 28, 173, 182, 146, 77, 52, 203, 162, 151, 125, 76, 55, 176, 192, 104,
+        170, 5, 193, 174, 137, 255, 169, 176, 132, 64, 199, 115,
+    ];
+    let k2 = [
+        1, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0,
+    ];
+    let v2 = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0,
+    ];
+    let k3 = [
+        1, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0,
+    ];
+    let v3 = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0,
+    ];
+
+    let mut smt = SMT::default();
+    // inserted keys shouldn't interfere with each other
+    assert_ne!(k1, k2);
+    assert_ne!(k2, k3);
+    assert_ne!(k1, k3);
+    smt.update(k1.into(), v1.into()).unwrap();
+    smt.update(k2.into(), v2.into()).unwrap();
+    smt.update(k3.into(), v3.into()).unwrap();
+    assert_eq!(smt.get(&k1.into()).unwrap(), v1.into());
 }
