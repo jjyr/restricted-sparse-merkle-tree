@@ -92,8 +92,7 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
             .map(|b| max(b.key.fork_height(&key), b.fork_height))
             .unwrap_or(0);
         // branch.is_none() represents the descendants are zeros, so we can stop the loop
-        while branch.is_some() {
-            let branch_node = branch.unwrap();
+        while let Some(branch_node) = branch {
             let fork_height = max(key.fork_height(&branch_node.key), branch_node.fork_height);
             if height > branch_node.fork_height {
                 // the merge height is higher than node, so we do not need to remove node's branch
@@ -155,11 +154,7 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
         }
 
         // recompute the tree from bottom to top
-        while !path.is_empty() {
-            // pop from path
-            let height = path.iter().next().map(|(height, _)| *height).unwrap();
-            let sibling = path.remove(&height).unwrap();
-
+        for (height, sibling) in path.into_iter() {
             let is_right = key.get_bit(height as u8);
             let parent = if is_right {
                 merge::<H>(&sibling, &node)
