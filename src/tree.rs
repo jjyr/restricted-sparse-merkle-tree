@@ -5,7 +5,7 @@ use crate::{
     merkle_proof::MerkleProof,
     traits::{Hasher, Store, Value},
     vec::Vec,
-    EXPECTED_PATH_SIZE, H256, TREE_HEIGHT,
+    EXPECTED_PATH_SIZE, H256,
 };
 use core::{cmp::max, marker::PhantomData};
 
@@ -155,7 +155,7 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
 
         // recompute the tree from bottom to top
         for (height, sibling) in path.into_iter() {
-            let is_right = key.get_bit(height as u8);
+            let is_right = key.get_bit(height);
             let parent = if is_right {
                 merge::<H>(&sibling, &node)
             } else {
@@ -165,7 +165,7 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
             if !node.is_zero() {
                 // node is exists
                 let branch_node = BranchNode {
-                    fork_height: height as u8,
+                    fork_height: height,
                     sibling,
                     node,
                     key,
@@ -190,8 +190,8 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
                     break;
                 }
             };
-            let is_right = key.get_bit(branch_node.fork_height as u8);
-            let (left, right) = branch_node.branch(branch_node.fork_height as u8);
+            let is_right = key.get_bit(branch_node.fork_height);
+            let (left, right) = branch_node.branch(branch_node.fork_height);
             if is_right {
                 node = *right;
             } else {
@@ -215,11 +215,7 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
 
     /// fetch merkle path of key into cache
     /// cache: (height, key) -> node
-    fn fetch_merkle_path(
-        &self,
-        key: &H256,
-        cache: &mut BTreeMap<(usize, H256), H256>,
-    ) -> Result<()> {
+    fn fetch_merkle_path(&self, key: &H256, cache: &mut BTreeMap<(u8, H256), H256>) -> Result<()> {
         let mut node = self.root;
         let mut height = self
             .store
@@ -239,17 +235,15 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
                         let fork_height =
                             max(key.fork_height(&branch_node.key), branch_node.fork_height);
 
-                        let is_right = key.get_bit(fork_height as u8);
-                        let mut sibling_key = key.parent_path(fork_height as u8);
+                        let is_right = key.get_bit(fork_height);
+                        let mut sibling_key = key.parent_path(fork_height);
                         if is_right {
                         } else {
                             // mark sibling's index, sibling on the right path.
-                            sibling_key.set_bit(height as u8);
+                            sibling_key.set_bit(height);
                         };
                         if !node.is_zero() {
-                            cache
-                                .entry((fork_height as usize, sibling_key))
-                                .or_insert(node);
+                            cache.entry((fork_height, sibling_key)).or_insert(node);
                         }
                         break;
                     }
@@ -269,13 +263,13 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
                         sibling = *right;
                         node = *left;
                     }
-                    let mut sibling_key = key.parent_path(height as u8);
+                    let mut sibling_key = key.parent_path(height);
                     if is_right {
                     } else {
                         // mark sibling's index, sibling on the right path.
-                        sibling_key.set_bit(height as u8);
+                        sibling_key.set_bit(height);
                     };
-                    cache.insert((height as usize, sibling_key), sibling);
+                    cache.insert((height, sibling_key), sibling);
                     if let Some(branch_node) = self.store.get_branch(&node)? {
                         let fork_height =
                             max(key.fork_height(&branch_node.key), branch_node.fork_height);
@@ -298,7 +292,7 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
         keys.sort_unstable();
 
         // fetch all merkle path
-        let mut cache: BTreeMap<(usize, H256), H256> = Default::default();
+        let mut cache: BTreeMap<(u8, H256), H256> = Default::default();
         for k in &keys {
             self.fetch_merkle_path(k, &mut cache)?;
         }
@@ -312,14 +306,14 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
         let keys_len = keys.len();
         // build merkle proofs from bottom to up
         // (key, height, key_index)
-        let mut queue: VecDeque<(H256, usize, usize)> = keys
+        let mut queue: VecDeque<(H256, u8, usize)> = keys
             .into_iter()
             .enumerate()
             .map(|(i, k)| (k, 0, i))
             .collect();
 
         while let Some((key, height, leaf_index)) = queue.pop_front() {
-            if queue.is_empty() && cache.is_empty() || height == TREE_HEIGHT {
+            if queue.is_empty() && cache.is_empty() {
                 // tree only contains one leaf
                 if leaves_path[leaf_index].is_empty() {
                     leaves_path[leaf_index].push(core::u8::MAX);
@@ -327,15 +321,15 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
                 break;
             }
             // compute sibling key
-            let mut sibling_key = key.parent_path(height as u8);
+            let mut sibling_key = key.parent_path(height);
 
-            let is_right = key.get_bit(height as u8);
+            let is_right = key.get_bit(height);
             if is_right {
                 // sibling on left
-                sibling_key.clear_bit(height as u8);
+                sibling_key.clear_bit(height);
             } else {
                 // sibling on right
-                sibling_key.set_bit(height as u8);
+                sibling_key.set_bit(height);
             }
             if Some((&sibling_key, &height))
                 == queue
@@ -344,28 +338,29 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
             {
                 // drop the sibling, mark sibling's merkle path
                 let (_sibling_key, height, leaf_index) = queue.pop_front().unwrap();
-                leaves_path[leaf_index].push(height as u8);
+                leaves_path[leaf_index].push(height);
             } else {
                 match cache.remove(&(height, sibling_key)) {
                     Some(sibling) => {
-                        debug_assert!(height <= core::u8::MAX as usize);
                         // save first non-zero sibling's height for leaves
-                        proof.push((sibling, height as u8));
+                        proof.push((sibling, height));
                     }
                     None => {
                         // skip zero siblings
                         if !is_right {
-                            sibling_key.clear_bit(height as u8);
+                            sibling_key.clear_bit(height);
                         }
                         let parent_key = sibling_key;
-                        queue.push_back((parent_key, height + 1, leaf_index));
-                        continue;
+                        if height < core::u8::MAX {
+                            queue.push_back((parent_key, height + 1, leaf_index));
+                            continue;
+                        }
                     }
                 }
             }
             // find new non-zero sibling, append to leaf's path
-            leaves_path[leaf_index].push(height as u8);
-            if height < TREE_HEIGHT {
+            leaves_path[leaf_index].push(height);
+            if height < core::u8::MAX {
                 // get parent_key, which k.get_bit(height) is false
                 let parent_key = if is_right { sibling_key } else { key };
                 queue.push_back((parent_key, height + 1, leaf_index));

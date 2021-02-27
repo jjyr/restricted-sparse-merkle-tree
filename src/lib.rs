@@ -38,7 +38,7 @@
 //! }
 //!
 //! fn construct_smt() {
-//!     let mut tree = SMT::default();  
+//!     let mut tree = SMT::default();
 //!     for (i, word) in "The quick brown fox jumps over the lazy dog"
 //!         .split_whitespace()
 //!         .enumerate()
@@ -79,8 +79,6 @@ pub use tree::SparseMerkleTree;
 
 /// Expected path size: log2(256) * 2, used for hint vector capacity
 pub const EXPECTED_PATH_SIZE: usize = 16;
-/// Height of sparse merkle tree
-pub const TREE_HEIGHT: usize = 256;
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "std")] {
