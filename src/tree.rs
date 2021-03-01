@@ -226,69 +226,44 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
         cache: &mut BTreeMap<(usize, H256), H256>,
     ) -> Result<()> {
         let mut node = self.root;
-        let mut height = self
-            .store
-            .get_branch(&node)?
-            .map(|b| max(b.key.fork_height(&key), b.fork_height))
-            .unwrap_or(0);
-        while !node.is_zero() {
-            // the descendants are zeros, so we can break the loop
-            if node.is_zero() {
+        while let Some(branch_node) = self.store.get_branch(&node)? {
+            let height = max(key.fork_height(&branch_node.key), branch_node.fork_height);
+            if height <= branch_node.fork_height {
+                // node is child
+            } else {
+                let is_right = key.get_bit(height);
+                let mut sibling_key = key.parent_path(height);
+                if is_right {
+                } else {
+                    // mark sibling's index, sibling on the right path.
+                    sibling_key.set_bit(height);
+                };
+                cache.entry((height as usize, sibling_key)).or_insert(node);
                 break;
             }
-            match self.store.get_branch(&node)? {
-                Some(branch_node) => {
-                    if height <= branch_node.fork_height {
-                        // node is child
-                    } else {
-                        let fork_height =
-                            max(key.fork_height(&branch_node.key), branch_node.fork_height);
-
-                        let is_right = key.get_bit(fork_height as u8);
-                        let mut sibling_key = key.parent_path(fork_height as u8);
-                        if is_right {
-                        } else {
-                            // mark sibling's index, sibling on the right path.
-                            sibling_key.set_bit(height as u8);
-                        };
-                        if !node.is_zero() {
-                            cache
-                                .entry((fork_height as usize, sibling_key))
-                                .or_insert(node);
-                        }
-                        break;
-                    }
-                    let (left, right) = branch_node.branch(height);
-                    let is_right = key.get_bit(height);
-                    let sibling;
-                    if is_right {
-                        if &node == right {
-                            break;
-                        }
-                        sibling = *left;
-                        node = *right;
-                    } else {
-                        if &node == left {
-                            break;
-                        }
-                        sibling = *right;
-                        node = *left;
-                    }
-                    let mut sibling_key = key.parent_path(height as u8);
-                    if is_right {
-                    } else {
-                        // mark sibling's index, sibling on the right path.
-                        sibling_key.set_bit(height as u8);
-                    };
-                    cache.insert((height as usize, sibling_key), sibling);
-                    if let Some(branch_node) = self.store.get_branch(&node)? {
-                        let fork_height =
-                            max(key.fork_height(&branch_node.key), branch_node.fork_height);
-                        height = fork_height;
-                    }
+            let (left, right) = branch_node.branch(height);
+            let is_right = key.get_bit(height);
+            let sibling;
+            if is_right {
+                if &node == right {
+                    break;
                 }
-                None => break,
+                sibling = *left;
+                node = *right;
+            } else {
+                if &node == left {
+                    break;
+                }
+                sibling = *right;
+                node = *left;
+            }
+            let mut sibling_key = key.parent_path(height);
+            if is_right {
+            } else {
+                // mark sibling's index, sibling on the right path.
+                sibling_key.set_bit(height);
             };
+            cache.insert((height as usize, sibling_key), sibling);
         }
         Ok(())
     }
@@ -304,8 +279,10 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
 
         // fetch all merkle path
         let mut cache: BTreeMap<(usize, H256), H256> = Default::default();
-        for k in &keys {
-            self.fetch_merkle_path(k, &mut cache)?;
+        if !self.is_empty() {
+            for k in &keys {
+                self.fetch_merkle_path(k, &mut cache)?;
+            }
         }
 
         // (node, height)
