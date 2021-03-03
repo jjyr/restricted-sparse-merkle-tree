@@ -171,15 +171,12 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
     /// Get value of a leaf
     /// return zero value if leaf not exists
     pub fn get(&self, key: &H256) -> Result<V> {
+        if self.is_empty() {
+            return Ok(V::zero());
+        }
+
         let mut node = self.root;
-        // children must equals to zero when parent equals to zero
-        while !node.is_zero() {
-            let branch_node = match self.store.get_branch(&node)? {
-                Some(branch_node) => branch_node,
-                None => {
-                    break;
-                }
-            };
+        while let Some(branch_node) = self.store.get_branch(&node)? {
             let is_right = key.get_bit(branch_node.fork_height as u8);
             let (left, right) = branch_node.branch(branch_node.fork_height as u8);
             if is_right {
@@ -187,15 +184,15 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
             } else {
                 node = *left;
             }
+            // children must equals to zero when parent equals to zero
+            if node.is_zero() {
+                return Ok(V::zero());
+            }
             if branch_node.fork_height == 0 {
                 break;
             }
         }
 
-        // return zero is leaf_key is zero
-        if node.is_zero() {
-            return Ok(V::zero());
-        }
         // get leaf node
         match self.store.get_leaf(&node)? {
             Some(leaf) if &leaf.key == key => Ok(leaf.value),

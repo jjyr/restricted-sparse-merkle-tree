@@ -189,6 +189,46 @@ fn test_delete_a_leaf() {
     assert_eq!(tree.store().branches_map(), store.branches_map());
 }
 
+#[test]
+fn test_sibling_key_get() {
+    {
+        let mut tree = SMT::default();
+        let key = H256::from([
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ]);
+        let value = H256::from([1u8; 32]);
+        tree.update(key, value).expect("update");
+
+        let sibling_key = H256::from([
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ]);
+        // get non exists sibling key should return zero value;
+        assert_eq!(H256::zero(), tree.get(&sibling_key).unwrap());
+    }
+
+    {
+        let mut tree = SMT::default();
+        let key = H256::from([
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ]);
+        let value = H256::from([1u8; 32]);
+        tree.update(key, value).expect("update");
+
+        let sibling_key = H256::from([
+            1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ]);
+        let sibling_value = H256::from([2u8; 32]);
+        tree.update(sibling_key, sibling_value).expect("update");
+        // get sibling key should return corresponding value
+        assert_eq!(value, tree.get(&key).unwrap());
+        assert_eq!(sibling_value, tree.get(&sibling_key).unwrap());
+    }
+}
+
 fn test_construct(key: H256, value: H256) {
     // insert same value to sibling key will construct a different root
 
