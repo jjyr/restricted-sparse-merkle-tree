@@ -4,7 +4,7 @@ use crate::{
     merge::{hash_leaf, merge},
     traits::Hasher,
     vec::Vec,
-    H256, TREE_HEIGHT,
+    H256,
 };
 
 type Range = core::ops::Range<usize>;
@@ -75,16 +75,11 @@ impl MerkleProof {
 
             if proof.is_empty() && tree_buf.is_empty() {
                 return Ok(CompiledMerkleProof(program.0));
-            } else if height == TREE_HEIGHT {
-                if !proof.is_empty() {
-                    return Err(Error::CorruptedProof);
-                }
-                return Ok(CompiledMerkleProof(program.0));
             }
 
-            let mut sibling_key = key.parent_path(height as u8);
-            if !key.get_bit(height as u8) {
-                sibling_key.set_bit(height as u8)
+            let mut sibling_key = key.parent_path(height);
+            if !key.get_bit(height) {
+                sibling_key.set_bit(height)
             }
 
             let (parent_key, parent_program, height) =
@@ -92,34 +87,38 @@ impl MerkleProof {
                     let (_leaf_index, sibling_program) = tree_buf
                         .remove(&(height, sibling_key))
                         .expect("pop sibling");
-                    let parent_key = key.parent_path(height as u8);
-                    let parent_program = merge_program(&program, &sibling_program, height as u8)?;
+                    let parent_key = key.parent_path(height);
+                    let parent_program = merge_program(&program, &sibling_program, height)?;
                     (parent_key, parent_program, height)
                 } else {
-                    let merge_height = leaves_path[leaf_index]
-                        .front()
-                        .map(|h| *h as usize)
-                        .unwrap_or(height);
+                    let merge_height = leaves_path[leaf_index].front().copied().unwrap_or(height);
                     if height != merge_height {
                         debug_assert!(height < merge_height);
-                        let parent_key = key.copy_bits(merge_height as u8..);
+                        let parent_key = key.copy_bits(merge_height..);
                         // skip zeros
                         tree_buf.insert((merge_height, parent_key), (leaf_index, program));
                         continue;
                     }
                     let (proof, proof_height) = proof.pop_front().expect("pop proof");
                     debug_assert_eq!(proof_height, leaves_path[leaf_index][0]);
-                    let proof_height = proof_height as usize;
+                    let proof_height = proof_height;
                     debug_assert!(height <= proof_height);
                     if height < proof_height {
                         height = proof_height;
                     }
 
-                    let parent_key = key.parent_path(height as u8);
-                    let parent_program = proof_program(&program, proof, height as u8);
+                    let parent_key = key.parent_path(height);
+                    let parent_program = proof_program(&program, proof, height);
                     (parent_key, parent_program, height)
                 };
 
+            if height == core::u8::MAX {
+                if proof.is_empty() {
+                    return Ok(CompiledMerkleProof(parent_program.0));
+                } else {
+                    return Err(Error::CorruptedProof);
+                }
+            }
             leaves_path[leaf_index].pop_front();
             tree_buf.insert((height + 1, parent_key), (leaf_index, parent_program));
         }
@@ -162,16 +161,11 @@ impl MerkleProof {
 
             if proof.is_empty() && tree_buf.is_empty() {
                 return Ok(node);
-            } else if height == TREE_HEIGHT {
-                if !proof.is_empty() {
-                    return Err(Error::CorruptedProof);
-                }
-                return Ok(node);
             }
 
-            let mut sibling_key = key.parent_path(height as u8);
-            if !key.get_bit(height as u8) {
-                sibling_key.set_bit(height as u8)
+            let mut sibling_key = key.parent_path(height);
+            if !key.get_bit(height) {
+                sibling_key.set_bit(height)
             }
             let (sibling, sibling_height) =
                 if Some(&(height, sibling_key)) == tree_buf.keys().next() {
@@ -180,35 +174,41 @@ impl MerkleProof {
                         .expect("pop sibling");
                     (sibling, height)
                 } else {
-                    let merge_height = leaves_path[leaf_index]
-                        .front()
-                        .map(|h| *h as usize)
-                        .unwrap_or(height);
+                    let merge_height = leaves_path[leaf_index].front().copied().unwrap_or(height);
                     if height != merge_height {
                         debug_assert!(height < merge_height);
-                        let parent_key = key.copy_bits(merge_height as u8..);
+                        let parent_key = key.copy_bits(merge_height..);
                         // skip zeros
                         tree_buf.insert((merge_height, parent_key), (leaf_index, node));
                         continue;
                     }
                     let (node, height) = proof.pop_front().expect("pop proof");
                     debug_assert_eq!(height, leaves_path[leaf_index][0]);
-                    (node, height as usize)
+                    (node, height)
                 };
             debug_assert!(height <= sibling_height);
             if height < sibling_height {
                 height = sibling_height;
             }
             // skip zero merkle path
-            let parent_key = key.parent_path(height as u8);
+            let parent_key = key.parent_path(height);
 
-            let parent = if key.get_bit(height as u8) {
+            let parent = if key.get_bit(height) {
                 merge::<H>(&sibling, &node)
             } else {
                 merge::<H>(&node, &sibling)
             };
-            leaves_path[leaf_index].pop_front();
-            tree_buf.insert((height + 1, parent_key), (leaf_index, parent));
+
+            if height == core::u8::MAX {
+                if proof.is_empty() {
+                    return Ok(parent);
+                } else {
+                    return Err(Error::CorruptedProof);
+                }
+            } else {
+                leaves_path[leaf_index].pop_front();
+                tree_buf.insert((height + 1, parent_key), (leaf_index, parent));
+            }
         }
 
         Err(Error::CorruptedProof)
