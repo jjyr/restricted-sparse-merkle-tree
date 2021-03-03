@@ -83,7 +83,7 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
     /// set to zero value to delete a key
     pub fn update(&mut self, key: H256, value: V) -> Result<&H256> {
         // store the path, sparse index will ignore zero members
-        let mut path: BTreeMap<_, _> = Default::default();
+        let mut path = Vec::new();
         // walk path from top to bottom
         let mut node = self.root;
         // branch.is_none() represents the descendants are zeros, so we can stop the loop
@@ -91,7 +91,7 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
             let height = max(branch_node.key.fork_height(&key), branch_node.fork_height);
             if height > branch_node.fork_height {
                 // the merge height is higher than node, so we do not need to remove node's branch
-                path.insert(height, node);
+                path.push((height, node));
                 break;
             }
             // branch node is parent if height is less than branch_node's height
@@ -115,7 +115,7 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
                 sibling = *right;
                 node = *left;
             }
-            path.insert(height, sibling);
+            path.push((height, sibling));
         }
         // delete previous leaf
         if let Some(leaf) = self.store.get_leaf(&node)? {
@@ -144,7 +144,7 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
         }
 
         // recompute the tree from bottom to top
-        for (height, sibling) in path.into_iter() {
+        for (height, sibling) in path.into_iter().rev() {
             let is_right = key.get_bit(height as u8);
             let parent = if is_right {
                 merge::<H>(&sibling, &node)
