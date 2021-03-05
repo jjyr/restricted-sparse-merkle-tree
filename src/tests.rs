@@ -318,6 +318,28 @@ fn leaves(
     })
 }
 
+fn leaves_path(max_leaves_path: usize, max_leaves: usize) -> impl Strategy<Value = Vec<Vec<u8>>> {
+    prop::collection::vec(
+        prop::collection::vec(prop::num::u8::ANY, max_leaves_path),
+        max_leaves,
+    )
+}
+
+fn merkle_proof(max_proof: usize) -> impl Strategy<Value = Vec<(H256, u8)>> {
+    prop::collection::vec(
+        (prop::array::uniform32(0u8..), prop::num::u8::ANY),
+        max_proof,
+    )
+    .prop_flat_map(|proof| {
+        Just(
+            proof
+                .into_iter()
+                .map(|(item, n)| (item.into(), n))
+                .collect(),
+        )
+    })
+}
+
 proptest! {
     #[test]
     fn test_h256(key: [u8; 32], key2: [u8; 32]) {
@@ -488,6 +510,43 @@ proptest! {
         for (k, v) in pairs[..len].iter() {
             let value = smt.get(k).unwrap();
             assert_eq!(v, &value);
+        }
+    }
+
+    #[test]
+    fn test_smt_not_crash(
+        (leaves, _n) in leaves(0, 30),
+        leaves_path in leaves_path(30, 30),
+        proof in merkle_proof(50)
+    ){
+        let proof = MerkleProof::new(leaves_path, proof);
+        // test compute_root not crash
+        let _result = proof.clone().compute_root::<Blake2bHasher>(leaves.clone());
+        // test compile not crash
+        let _result = proof.compile(leaves);
+    }
+
+    #[test]
+    fn test_try_crash_compiled_merkle_proof((leaves, _n) in leaves(0, 30)) {
+        // construct cases to crush compiled merkle proof
+        let case1 = [0x50, 0x48, 0x4C].to_vec();
+        let case2 = [0x48, 0x4C].to_vec();
+        let case3 = [0x4C, 0x50].to_vec();
+        let case4 = [0x4C, 0x48].to_vec();
+        let case5 = [0x50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0].to_vec();
+        let case6 = [0x48, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0].to_vec();
+        let case7 = [0x4C, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                     0, 0, 0, 0].to_vec();
+
+        for case in [case1, case2, case3, case4, case5, case6, case7].iter() {
+            let proof = CompiledMerkleProof(case.to_vec());
+            // test compute root not crash
+            let _result = proof.compute_root::<Blake2bHasher>(leaves.clone());
         }
     }
 }

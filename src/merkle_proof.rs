@@ -93,16 +93,13 @@ impl MerkleProof {
                 } else {
                     let merge_height = leaves_path[leaf_index].front().copied().unwrap_or(height);
                     if height != merge_height {
-                        debug_assert!(height < merge_height);
                         let parent_key = key.copy_bits(merge_height..);
                         // skip zeros
                         tree_buf.insert((merge_height, parent_key), (leaf_index, program));
                         continue;
                     }
-                    let (proof, proof_height) = proof.pop_front().expect("pop proof");
-                    debug_assert_eq!(proof_height, leaves_path[leaf_index][0]);
+                    let (proof, proof_height) = proof.pop_front().ok_or(Error::CorruptedProof)?;
                     let proof_height = proof_height;
-                    debug_assert!(height <= proof_height);
                     if height < proof_height {
                         height = proof_height;
                     }
@@ -176,17 +173,14 @@ impl MerkleProof {
                 } else {
                     let merge_height = leaves_path[leaf_index].front().copied().unwrap_or(height);
                     if height != merge_height {
-                        debug_assert!(height < merge_height);
                         let parent_key = key.copy_bits(merge_height..);
                         // skip zeros
                         tree_buf.insert((merge_height, parent_key), (leaf_index, node));
                         continue;
                     }
-                    let (node, height) = proof.pop_front().expect("pop proof");
-                    debug_assert_eq!(height, leaves_path[leaf_index][0]);
+                    let (node, height) = proof.pop_front().ok_or(Error::CorruptedProof)?;
                     (node, height)
                 };
-            debug_assert!(height <= sibling_height);
             if height < sibling_height {
                 height = sibling_height;
             }
