@@ -5,7 +5,7 @@ use crate::{
     merkle_proof::MerkleProof,
     traits::{Hasher, Store, Value},
     vec::Vec,
-    EXPECTED_PATH_SIZE, H256,
+    EXPECTED_PATH_SIZE, H256, ZERO,
 };
 use core::{cmp::max, marker::PhantomData};
 
@@ -14,19 +14,30 @@ use core::{cmp::max, marker::PhantomData};
 pub struct BranchNode {
     pub fork_height: u8,
     pub key: H256,
-    pub node: H256,
-    pub sibling: H256,
+    pub node_type: NodeType,
 }
 
 impl BranchNode {
     fn branch(&self, height: u8) -> (&H256, &H256) {
         let is_right = self.key.get_bit(height);
         if is_right {
-            (&self.sibling, &self.node)
+            match self.node_type {
+                NodeType::Single(ref node) => (&ZERO, node),
+                NodeType::Pair(ref node, ref sibling) => (sibling, node),
+            }
         } else {
-            (&self.node, &self.sibling)
+            match self.node_type {
+                NodeType::Single(ref node) => (node, &ZERO),
+                NodeType::Pair(ref node, ref sibling) => (node, sibling),
+            }
         }
     }
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum NodeType {
+    Single(H256),
+    Pair(H256, H256),
 }
 
 /// A leaf in the SMT
@@ -137,8 +148,7 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
                 BranchNode {
                     key,
                     fork_height: 0,
-                    node,
-                    sibling: H256::zero(),
+                    node_type: NodeType::Single(node),
                 },
             )?;
         }
@@ -155,10 +165,9 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
             if !node.is_zero() {
                 // node is exists
                 let branch_node = BranchNode {
-                    fork_height: height,
-                    sibling,
-                    node,
                     key,
+                    fork_height: height,
+                    node_type: NodeType::Pair(node, sibling),
                 };
                 self.store.insert_branch(parent, branch_node)?;
             }

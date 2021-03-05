@@ -4,7 +4,7 @@ use core::cmp::Ordering;
 #[derive(Eq, PartialEq, Debug, Default, Hash, Clone, Copy)]
 pub struct H256([u8; 32]);
 
-const ZERO: H256 = H256([0u8; 32]);
+pub const ZERO: H256 = H256([0u8; 32]);
 const BYTE_SIZE: u8 = 8;
 
 impl H256 {
