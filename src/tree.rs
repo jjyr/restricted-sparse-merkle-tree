@@ -5,7 +5,7 @@ use crate::{
     merkle_proof::MerkleProof,
     traits::{Hasher, Store, Value},
     vec::Vec,
-    EXPECTED_PATH_SIZE, H256, ZERO,
+    EXPECTED_PATH_SIZE, H256,
 };
 use core::{cmp::max, marker::PhantomData};
 
@@ -18,19 +18,36 @@ pub struct BranchNode {
 }
 
 impl BranchNode {
-    fn branch(&self, height: u8) -> (&H256, &H256) {
-        let is_right = self.key.get_bit(height);
-        if is_right {
-            match self.node_type {
-                NodeType::Single(ref node) => (&ZERO, node),
-                NodeType::Pair(ref node, ref sibling) => (sibling, node),
-            }
-        } else {
-            match self.node_type {
-                NodeType::Single(ref node) => (node, &ZERO),
-                NodeType::Pair(ref node, ref sibling) => (node, sibling),
-            }
+    fn is_pair(&self) -> bool {
+        match self.node_type {
+            NodeType::Pair(_, _) => true,
+            _ => false,
         }
+    }
+
+    fn branch(&self, height: u8) -> (&H256, &H256) {
+        match self.node_type {
+            NodeType::Pair(ref node, ref sibling) => {
+                let is_right = self.key.get_bit(height);
+                if is_right {
+                    (sibling, node)
+                } else {
+                    (node, sibling)
+                }
+            }
+            _ => unreachable!("should be called on pair node only"),
+        }
+    }
+
+    fn node(&self) -> &H256 {
+        match self.node_type {
+            NodeType::Single(ref node) => node,
+            _ => unreachable!("should be called on single node only"),
+        }
+    }
+
+    fn key(&self) -> &H256 {
+        &self.key
     }
 }
 
@@ -95,44 +112,37 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
     pub fn update(&mut self, key: H256, value: V) -> Result<&H256> {
         // store the path, sparse index will ignore zero members
         let mut path = Vec::new();
-        // walk path from top to bottom
-        let mut node = self.root;
-        // branch.is_none() represents the descendants are zeros, so we can stop the loop
-        while let Some(branch_node) = self.store.get_branch(&node)? {
-            let height = max(branch_node.key.fork_height(&key), branch_node.fork_height);
-            if height > branch_node.fork_height {
-                // the merge height is higher than node, so we do not need to remove node's branch
-                path.push((height, node));
-                break;
-            }
-            // branch node is parent if height is less than branch_node's height
-            // remove it from store
-            if branch_node.fork_height > 0 {
-                self.store.remove_branch(&node)?;
-            }
-            let (left, right) = branch_node.branch(height);
-            let is_right = key.get_bit(height);
-            let sibling;
-            if is_right {
-                if &node == right {
+        if !self.is_empty() {
+            let mut node = self.root;
+            loop {
+                let branch_node = self.store.get_branch(&node)?.expect("stored branch node");
+                if branch_node.is_pair() {
+                    let height = max(key.fork_height(branch_node.key()), branch_node.fork_height);
+                    if height > branch_node.fork_height {
+                        // the merge height is higher than node, so we do not need to remove node's branch
+                        path.push((height, node));
+                        break;
+                    } else {
+                        self.store.remove_branch(&node)?;
+                        let (left, right) = branch_node.branch(height);
+                        let is_right = key.get_bit(height);
+                        if is_right {
+                            node = *right;
+                            path.push((height, *left));
+                        } else {
+                            node = *left;
+                            path.push((height, *right));
+                        }
+                    }
+                } else {
+                    if &key == branch_node.key() {
+                        self.store.remove_leaf(&node)?;
+                        self.store.remove_branch(&node)?;
+                    } else {
+                        path.push((key.fork_height(branch_node.key()), *branch_node.node()));
+                    }
                     break;
                 }
-                sibling = *left;
-                node = *right;
-            } else {
-                if &node == left {
-                    break;
-                }
-                sibling = *right;
-                node = *left;
-            }
-            path.push((height, sibling));
-        }
-        // delete previous leaf
-        if let Some(leaf) = self.store.get_leaf(&node)? {
-            if leaf.key == key {
-                self.store.remove_leaf(&node)?;
-                self.store.remove_branch(&node)?;
             }
         }
 
@@ -185,27 +195,23 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
         }
 
         let mut node = self.root;
-        while let Some(branch_node) = self.store.get_branch(&node)? {
-            let is_right = key.get_bit(branch_node.fork_height);
-            let (left, right) = branch_node.branch(branch_node.fork_height);
-            if is_right {
-                node = *right;
+        loop {
+            let branch_node = self.store.get_branch(&node)?.expect("stored branch node");
+            if branch_node.is_pair() {
+                let is_right = key.get_bit(branch_node.fork_height);
+                let (left, right) = branch_node.branch(branch_node.fork_height);
+                node = if is_right { *right } else { *left };
             } else {
-                node = *left;
+                if key == branch_node.key() {
+                    return Ok(self
+                        .store
+                        .get_leaf(branch_node.node())?
+                        .expect("stored leaf node")
+                        .value);
+                } else {
+                    return Ok(V::zero());
+                }
             }
-            // children must equals to zero when parent equals to zero
-            if node.is_zero() {
-                return Ok(V::zero());
-            }
-            if branch_node.fork_height == 0 {
-                break;
-            }
-        }
-
-        // get leaf node
-        match self.store.get_leaf(&node)? {
-            Some(leaf) if &leaf.key == key => Ok(leaf.value),
-            _ => Ok(V::zero()),
         }
     }
 
@@ -213,45 +219,46 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
     /// cache: (height, key) -> node
     fn fetch_merkle_path(&self, key: &H256, cache: &mut BTreeMap<(u8, H256), H256>) -> Result<()> {
         let mut node = self.root;
-        while let Some(branch_node) = self.store.get_branch(&node)? {
-            let height = max(key.fork_height(&branch_node.key), branch_node.fork_height);
-            if height <= branch_node.fork_height {
-                // node is child
-            } else {
-                let is_right = key.get_bit(height);
-                let mut sibling_key = key.parent_path(height);
-                if is_right {
-                } else {
-                    // mark sibling's index, sibling on the right path.
-                    sibling_key.set_bit(height);
-                };
-                cache.entry((height, sibling_key)).or_insert(node);
-                break;
-            }
-            let (left, right) = branch_node.branch(height);
+        loop {
+            let branch_node = self.store.get_branch(&node)?.expect("stored branch node");
+            let height = max(key.fork_height(branch_node.key()), branch_node.fork_height);
             let is_right = key.get_bit(height);
-            let sibling;
-            if is_right {
-                if &node == right {
-                    break;
-                }
-                sibling = *left;
-                node = *right;
-            } else {
-                if &node == left {
-                    break;
-                }
-                sibling = *right;
-                node = *left;
-            }
             let mut sibling_key = key.parent_path(height);
-            if is_right {
-            } else {
+            if !is_right {
                 // mark sibling's index, sibling on the right path.
                 sibling_key.set_bit(height);
             };
-            cache.insert((height, sibling_key), sibling);
+
+            if branch_node.is_pair() {
+                if height > branch_node.fork_height {
+                    cache.entry((height, sibling_key)).or_insert(node);
+                    break;
+                } else {
+                    let (left, right) = branch_node.branch(height);
+                    let sibling;
+                    if is_right {
+                        if &node == right {
+                            break;
+                        }
+                        sibling = *left;
+                        node = *right;
+                    } else {
+                        if &node == left {
+                            break;
+                        }
+                        sibling = *right;
+                        node = *left;
+                    }
+                    cache.insert((height, sibling_key), sibling);
+                }
+            } else {
+                if key != branch_node.key() {
+                    cache.insert((height, sibling_key), *branch_node.node());
+                }
+                break;
+            }
         }
+
         Ok(())
     }
 
