@@ -18,31 +18,18 @@ pub struct BranchNode {
 }
 
 impl BranchNode {
-    fn is_pair(&self) -> bool {
+    // get node at a specific height
+    fn node_at(&self, height: u8) -> NodeType {
         match self.node_type {
-            NodeType::Pair(_, _) => true,
-            _ => false,
-        }
-    }
-
-    fn branch(&self, height: u8) -> (&H256, &H256) {
-        match self.node_type {
-            NodeType::Pair(ref node, ref sibling) => {
+            NodeType::Pair(node, sibling) => {
                 let is_right = self.key.get_bit(height);
                 if is_right {
-                    (sibling, node)
+                    NodeType::Pair(sibling, node)
                 } else {
-                    (node, sibling)
+                    NodeType::Pair(node, sibling)
                 }
             }
-            _ => unreachable!("should be called on pair node only"),
-        }
-    }
-
-    fn node(&self) -> &H256 {
-        match self.node_type {
-            NodeType::Single(ref node) => node,
-            _ => unreachable!("should be called on single node only"),
+            NodeType::Single(node) => NodeType::Single(node),
         }
     }
 
@@ -118,33 +105,35 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
                 let branch_node = self
                     .store
                     .get_branch(&node)?
-                    .ok_or_else(|| Error::CorruptedStoreMissingBranch(node))?;
-                if branch_node.is_pair() {
-                    let height = max(key.fork_height(branch_node.key()), branch_node.fork_height);
-                    if height > branch_node.fork_height {
-                        // the merge height is higher than node, so we do not need to remove node's branch
-                        path.push((height, node));
-                        break;
-                    } else {
-                        self.store.remove_branch(&node)?;
-                        let (left, right) = branch_node.branch(height);
-                        let is_right = key.get_bit(height);
-                        if is_right {
-                            node = *right;
-                            path.push((height, *left));
+                    .ok_or_else(|| Error::MissingBranch(node))?;
+                let height = max(key.fork_height(branch_node.key()), branch_node.fork_height);
+                match branch_node.node_at(height) {
+                    NodeType::Pair(left, right) => {
+                        if height > branch_node.fork_height {
+                            // the merge height is higher than node, so we do not need to remove node's branch
+                            path.push((height, node));
+                            break;
                         } else {
-                            node = *left;
-                            path.push((height, *right));
+                            self.store.remove_branch(&node)?;
+                            let is_right = key.get_bit(height);
+                            if is_right {
+                                node = right;
+                                path.push((height, left));
+                            } else {
+                                node = left;
+                                path.push((height, right));
+                            }
                         }
                     }
-                } else {
-                    if &key == branch_node.key() {
-                        self.store.remove_leaf(&node)?;
-                        self.store.remove_branch(&node)?;
-                    } else {
-                        path.push((key.fork_height(branch_node.key()), *branch_node.node()));
+                    NodeType::Single(node) => {
+                        if &key == branch_node.key() {
+                            self.store.remove_leaf(&node)?;
+                            self.store.remove_branch(&node)?;
+                        } else {
+                            path.push((height, node));
+                        }
+                        break;
                     }
-                    break;
                 }
             }
         }
@@ -202,20 +191,23 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
             let branch_node = self
                 .store
                 .get_branch(&node)?
-                .ok_or_else(|| Error::CorruptedStoreMissingBranch(node))?;
-            if branch_node.is_pair() {
-                let is_right = key.get_bit(branch_node.fork_height);
-                let (left, right) = branch_node.branch(branch_node.fork_height);
-                node = if is_right { *right } else { *left };
-            } else {
-                if key == branch_node.key() {
-                    return Ok(self
-                        .store
-                        .get_leaf(branch_node.node())?
-                        .ok_or_else(|| Error::CorruptedStoreMissingLeaf(node))?
-                        .value);
-                } else {
-                    return Ok(V::zero());
+                .ok_or_else(|| Error::MissingBranch(node))?;
+
+            match branch_node.node_at(branch_node.fork_height) {
+                NodeType::Pair(left, right) => {
+                    let is_right = key.get_bit(branch_node.fork_height);
+                    node = if is_right { right } else { left };
+                }
+                NodeType::Single(node) => {
+                    if key == branch_node.key() {
+                        return Ok(self
+                            .store
+                            .get_leaf(&node)?
+                            .ok_or_else(|| Error::MissingLeaf(node))?
+                            .value);
+                    } else {
+                        return Ok(V::zero());
+                    }
                 }
             }
         }
@@ -229,7 +221,7 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
             let branch_node = self
                 .store
                 .get_branch(&node)?
-                .ok_or_else(|| Error::CorruptedStoreMissingBranch(node))?;
+                .ok_or_else(|| Error::MissingBranch(node))?;
             let height = max(key.fork_height(branch_node.key()), branch_node.fork_height);
             let is_right = key.get_bit(height);
             let mut sibling_key = key.parent_path(height);
@@ -238,33 +230,35 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
                 sibling_key.set_bit(height);
             };
 
-            if branch_node.is_pair() {
-                if height > branch_node.fork_height {
-                    cache.entry((height, sibling_key)).or_insert(node);
-                    break;
-                } else {
-                    let (left, right) = branch_node.branch(height);
-                    let sibling;
-                    if is_right {
-                        if &node == right {
-                            break;
-                        }
-                        sibling = *left;
-                        node = *right;
+            match branch_node.node_at(height) {
+                NodeType::Pair(left, right) => {
+                    if height > branch_node.fork_height {
+                        cache.entry((height, sibling_key)).or_insert(node);
+                        break;
                     } else {
-                        if &node == left {
-                            break;
+                        let sibling;
+                        if is_right {
+                            if node == right {
+                                break;
+                            }
+                            sibling = left;
+                            node = right;
+                        } else {
+                            if node == left {
+                                break;
+                            }
+                            sibling = right;
+                            node = left;
                         }
-                        sibling = *right;
-                        node = *left;
+                        cache.insert((height, sibling_key), sibling);
                     }
-                    cache.insert((height, sibling_key), sibling);
                 }
-            } else {
-                if key != branch_node.key() {
-                    cache.insert((height, sibling_key), *branch_node.node());
+                NodeType::Single(node) => {
+                    if key != branch_node.key() {
+                        cache.insert((height, sibling_key), node);
+                    }
+                    break;
                 }
-                break;
             }
         }
 

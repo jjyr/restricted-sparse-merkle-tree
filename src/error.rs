@@ -4,10 +4,9 @@ pub type Result<T> = ::core::result::Result<T, Error>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
-    MissingKey(usize, H256),
+    MissingBranch(H256),
+    MissingLeaf(H256),
     CorruptedProof,
-    CorruptedStoreMissingBranch(H256),
-    CorruptedStoreMissingLeaf(H256),
     EmptyProof,
     EmptyKeys,
     IncorrectNumberOfLeaves { expected: usize, actual: usize },
@@ -21,17 +20,14 @@ pub enum Error {
 impl core::fmt::Display for Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Error::MissingKey(height, key) => {
-                write!(f, "Missing key at height {}, key {:?}", height, key)?;
+            Error::MissingBranch(node) => {
+                write!(f, "Corrupted store, missing branch {:?}", node)?;
+            }
+            Error::MissingLeaf(node) => {
+                write!(f, "Corrupted store, missing leaf {:?}", node)?;
             }
             Error::CorruptedProof => {
                 write!(f, "Corrupted proof")?;
-            }
-            Error::CorruptedStoreMissingBranch(node) => {
-                write!(f, "Corrupted store, missing branch {:?}", node)?;
-            }
-            Error::CorruptedStoreMissingLeaf(node) => {
-                write!(f, "Corrupted store, missing leaf {:?}", node)?;
             }
             Error::EmptyProof => {
                 write!(f, "Empty proof")?;
