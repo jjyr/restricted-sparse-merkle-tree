@@ -115,7 +115,10 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
         if !self.is_empty() {
             let mut node = self.root;
             loop {
-                let branch_node = self.store.get_branch(&node)?.expect("stored branch node");
+                let branch_node = self
+                    .store
+                    .get_branch(&node)?
+                    .ok_or_else(|| Error::CorruptedStoreMissingBranch(node))?;
                 if branch_node.is_pair() {
                     let height = max(key.fork_height(branch_node.key()), branch_node.fork_height);
                     if height > branch_node.fork_height {
@@ -196,7 +199,10 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
 
         let mut node = self.root;
         loop {
-            let branch_node = self.store.get_branch(&node)?.expect("stored branch node");
+            let branch_node = self
+                .store
+                .get_branch(&node)?
+                .ok_or_else(|| Error::CorruptedStoreMissingBranch(node))?;
             if branch_node.is_pair() {
                 let is_right = key.get_bit(branch_node.fork_height);
                 let (left, right) = branch_node.branch(branch_node.fork_height);
@@ -206,7 +212,7 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
                     return Ok(self
                         .store
                         .get_leaf(branch_node.node())?
-                        .expect("stored leaf node")
+                        .ok_or_else(|| Error::CorruptedStoreMissingLeaf(node))?
                         .value);
                 } else {
                     return Ok(V::zero());
@@ -220,7 +226,10 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
     fn fetch_merkle_path(&self, key: &H256, cache: &mut BTreeMap<(u8, H256), H256>) -> Result<()> {
         let mut node = self.root;
         loop {
-            let branch_node = self.store.get_branch(&node)?.expect("stored branch node");
+            let branch_node = self
+                .store
+                .get_branch(&node)?
+                .ok_or_else(|| Error::CorruptedStoreMissingBranch(node))?;
             let height = max(key.fork_height(branch_node.key()), branch_node.fork_height);
             let is_right = key.get_bit(height);
             let mut sibling_key = key.parent_path(height);

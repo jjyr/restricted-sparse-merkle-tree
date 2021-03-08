@@ -6,6 +6,8 @@ pub type Result<T> = ::core::result::Result<T, Error>;
 pub enum Error {
     MissingKey(usize, H256),
     CorruptedProof,
+    CorruptedStoreMissingBranch(H256),
+    CorruptedStoreMissingLeaf(H256),
     EmptyProof,
     EmptyKeys,
     IncorrectNumberOfLeaves { expected: usize, actual: usize },
@@ -24,6 +26,12 @@ impl core::fmt::Display for Error {
             }
             Error::CorruptedProof => {
                 write!(f, "Corrupted proof")?;
+            }
+            Error::CorruptedStoreMissingBranch(node) => {
+                write!(f, "Corrupted store, missing branch {:?}", node)?;
+            }
+            Error::CorruptedStoreMissingLeaf(node) => {
+                write!(f, "Corrupted store, missing leaf {:?}", node)?;
             }
             Error::EmptyProof => {
                 write!(f, "Empty proof")?;
