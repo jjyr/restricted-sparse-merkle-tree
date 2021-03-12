@@ -6,6 +6,7 @@ edition = "2018"
 license = "MIT"
 repository = "https://github.com/jjyr/sparse-merkle-tree"
 description = "Sparse merkle tree implement in rust"
+exclude = ["/fixtures", "/proptest-regressions"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -23,6 +24,9 @@ proptest = "0.9"
 criterion = "0.2"
 rand = "0.7"
 hex = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
 
 [[bench]]
 name = "smt_benchmark"

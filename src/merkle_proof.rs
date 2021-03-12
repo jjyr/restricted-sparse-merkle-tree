@@ -381,3 +381,9 @@ impl CompiledMerkleProof {
         Ok(&calculated_root == root)
     }
 }
+
+impl Into<Vec<u8>> for CompiledMerkleProof {
+    fn into(self) -> Vec<u8> {
+        self.0
+    }
+}
