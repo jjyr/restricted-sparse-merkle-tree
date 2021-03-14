@@ -56,59 +56,27 @@ impl H256 {
     /// Treat H256 as a path in a tree
     /// return parent_path of self
     pub fn parent_path(&self, height: u8) -> Self {
-        height
-            .checked_add(1)
-            .map(|i| self.copy_bits(i..))
-            .unwrap_or_else(H256::zero)
+        if height == core::u8::MAX {
+            H256::zero()
+        } else {
+            self.copy_bits(height + 1)
+        }
     }
 
     /// Copy bits and return a new H256
-    pub fn copy_bits(&self, range: impl core::ops::RangeBounds<u8>) -> Self {
-        const MAX: usize = 256;
-        const BYTE: usize = 8;
-        use core::ops::Bound;
-
+    pub fn copy_bits(&self, start: u8) -> Self {
         let mut target = H256::zero();
-        let start = match range.start_bound() {
-            Bound::Included(&i) => i as usize,
-            Bound::Excluded(&i) => panic!("do not allows excluded start: {}", i),
-            Bound::Unbounded => 0,
-        };
 
-        let mut end = match range.end_bound() {
-            Bound::Included(&i) => i.saturating_add(1) as usize,
-            Bound::Excluded(&i) => i as usize,
-            Bound::Unbounded => MAX,
-        };
-
-        if start >= MAX {
-            return target;
-        } else if end > MAX {
-            end = MAX;
-        }
-
-        if end < start {
-            panic!("end can't less than start: start {} end {}", start, end);
-        }
-
-        let start_byte = {
-            let remain = if start % BYTE != 0 { 1 } else { 0 };
-            start / BYTE + remain
-        };
-        let end_byte = end / BYTE;
+        let start_byte = (start / BYTE_SIZE) as usize;
         // copy bytes
-        if start_byte < self.0.len() && start_byte <= end_byte {
-            target.0[start_byte..end_byte].copy_from_slice(&self.0[start_byte..end_byte]);
+        target.0[start_byte..].copy_from_slice(&self.0[start_byte..]);
+
+        // reset remain bytes
+        let remain = start % BYTE_SIZE;
+        if remain > 0 {
+            target.0[start_byte] &= 0b11111111 << remain
         }
 
-        // copy remain bits
-        for i in (start..core::cmp::min(start_byte * BYTE, end))
-            .chain(core::cmp::max(end_byte * BYTE, start)..end)
-        {
-            if self.get_bit(i as u8) {
-                target.set_bit(i as u8)
-            }
-        }
         target
     }
 }

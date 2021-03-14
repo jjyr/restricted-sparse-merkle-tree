@@ -93,7 +93,7 @@ impl MerkleProof {
                 } else {
                     let merge_height = leaves_path[leaf_index].front().copied().unwrap_or(height);
                     if height != merge_height {
-                        let parent_key = key.copy_bits(merge_height..);
+                        let parent_key = key.copy_bits(merge_height);
                         // skip zeros
                         tree_buf.insert((merge_height, parent_key), (leaf_index, program));
                         continue;
@@ -173,7 +173,7 @@ impl MerkleProof {
                 } else {
                     let merge_height = leaves_path[leaf_index].front().copied().unwrap_or(height);
                     if height != merge_height {
-                        let parent_key = key.copy_bits(merge_height..);
+                        let parent_key = key.copy_bits(merge_height);
                         // skip zeros
                         tree_buf.insert((merge_height, parent_key), (leaf_index, node));
                         continue;
@@ -344,8 +344,8 @@ impl CompiledMerkleProof {
                     program_index += 1;
                     let (key_b, value_b) = stack.pop().unwrap();
                     let (key_a, value_a) = stack.pop().unwrap();
-                    let parent_key_a = key_a.copy_bits(height..);
-                    let parent_key_b = key_b.copy_bits(height..);
+                    let parent_key_a = key_a.copy_bits(height);
+                    let parent_key_b = key_b.copy_bits(height);
                     let a_set = key_a.get_bit(height);
                     let b_set = key_b.get_bit(height);
                     let mut sibling_key_a = parent_key_a;
