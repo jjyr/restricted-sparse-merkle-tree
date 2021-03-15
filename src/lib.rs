@@ -73,7 +73,7 @@ mod tests;
 pub mod traits;
 pub mod tree;
 
-pub use h256::{H256, ZERO};
+pub use h256::H256;
 pub use merkle_proof::{CompiledMerkleProof, MerkleProof};
 pub use tree::SparseMerkleTree;
 
