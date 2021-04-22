@@ -130,26 +130,89 @@ fn run_test_case(case: Case) -> Result<()> {
             compiled_proof,
             error,
         } = proof;
-        let keys = leaves.iter().map(|(k, _v)| (*k).into()).collect();
-        let actual_compiled_proof: Vec<u8> = match smt.merkle_proof(keys) {
-            Ok(proof) => proof
-                .compile(
-                    leaves
-                        .iter()
-                        .map(|(k, v)| ((*k).into(), (*v).into()))
-                        .collect(),
-                )?
-                .into(),
+        let keys: Vec<_> = leaves.iter().map(|(k, _v)| (*k).into()).collect();
+        let actual_proof = match smt.merkle_proof(keys.clone()) {
+            Ok(proof) => proof,
             Err(err) => {
                 let expected_error = error.expect("expected error");
                 assert_eq!(expected_error, format!("{}", err));
                 return Ok(());
             }
         };
+        let actual_compiled_proof = actual_proof.clone().compile(
+            leaves
+                .iter()
+                .map(|(k, v)| ((*k).into(), (*v).into()))
+                .collect(),
+        )?;
+        let actual_compiled_proof_bin: Vec<u8> = actual_compiled_proof.clone().into();
 
-        assert_eq!(compiled_proof, actual_compiled_proof, "proof");
+        assert_eq!(compiled_proof, actual_compiled_proof_bin, "proof");
+        assert!(actual_compiled_proof
+            .verify::<Blake2bHasher>(
+                &root.into(),
+                leaves
+                    .iter()
+                    .map(|(k, v)| (H256::from(*k), H256::from(*v)))
+                    .collect(),
+            )
+            .expect("verify"));
     }
 
+    Ok(())
+}
+
+#[cfg(feature = "c_smt_impl")]
+fn run_test_case_c_impl(case: Case) -> Result<()> {
+    use super::c_smt::{new_ckb_smt, SmtCImpl};
+
+    let Case { leaves, proofs, .. } = case;
+
+    let ckb_smt = new_ckb_smt(
+        leaves
+            .iter()
+            .map(|(k, v)| ((*k).into(), (*v).into()))
+            .collect(),
+    );
+
+    for proof in proofs {
+        let Proof { leaves, error, .. } = proof;
+        let keys: Vec<_> = leaves.iter().map(|(k, _v)| (*k).into()).collect();
+        let ckb_actual_proof = match ckb_smt.merkle_proof(keys) {
+            Ok(proof) => proof,
+            Err(err) => {
+                let expected_error = error.expect("expected error");
+                assert_eq!(expected_error, format!("{}", err));
+                return Ok(());
+            }
+        };
+        let ckb_actual_compiled_proof = ckb_actual_proof.clone().compile(
+            leaves
+                .iter()
+                .map(|(k, v)| ((*k).into(), (*v).into()))
+                .collect(),
+        )?;
+        let ckb_actual_compiled_proof_bin: Vec<u8> = ckb_actual_compiled_proof.clone().into();
+
+        let mut smt_state = SmtCImpl::new(leaves.len() as u32);
+        for (key, value) in &leaves {
+            smt_state.insert(key, value).unwrap();
+        }
+        for (key, value) in &leaves {
+            let fetched_value = smt_state.fetch(key).unwrap();
+            assert_eq!(value, &fetched_value);
+        }
+        smt_state.normalize();
+        for (key, value) in &leaves {
+            let fetched_value = smt_state.fetch(key).unwrap();
+            assert_eq!(value, &fetched_value);
+        }
+
+        assert_eq!(smt_state.len(), leaves.len() as u32);
+        smt_state
+            .verify(ckb_smt.root().as_slice(), &ckb_actual_compiled_proof_bin)
+            .unwrap();
+    }
     Ok(())
 }
 
@@ -162,6 +225,18 @@ fn test_fixtures() {
         let content = fs::read(&path).expect("read");
         let case: Case = serde_json::from_slice(&content).expect("parse json");
         run_test_case(case).expect("test case");
+        println!("pass {}", i);
+    }
+}
+
+#[cfg(feature = "c_smt_impl")]
+#[test]
+fn test_fixtures_c_impl() {
+    for i in 0..100 {
+        let path = format!("{}/basic/case-{}.json", FIXTURES_DIR, i);
+        let content = fs::read(&path).expect("read");
+        let case: Case = serde_json::from_slice(&content).expect("parse json");
+        run_test_case_c_impl(case).expect("test case c impl");
         println!("pass {}", i);
     }
 }

@@ -1,0 +1,3 @@
+[submodule "deps/ckb-c-stdlib"]
+	path = deps/ckb-c-stdlib
+	url = https://github.com/XuJiandong/ckb-c-stdlib.git

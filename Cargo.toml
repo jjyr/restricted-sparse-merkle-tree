@@ -13,6 +13,7 @@ exclude = ["/fixtures", "/proptest-regressions"]
 [features]
 default = ["std", "blake2b"]
 std = []
+c_smt_impl = []
 blake2b = ["blake2b-rs"]
 
 [dependencies]
@@ -27,6 +28,9 @@ hex = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 anyhow = "1.0"
+
+[build-dependencies]
+cc = "1.0"
 
 [[bench]]
 name = "smt_benchmark"

@@ -2,6 +2,7 @@ default: fmt clippy test bench-test check
 
 test:
 	cargo test --all --all-features
+	cargo test tests::fixtures::test_fixtures_c_impl --features=c_smt_impl
 
 bench-test:
 	cargo bench -- --test
