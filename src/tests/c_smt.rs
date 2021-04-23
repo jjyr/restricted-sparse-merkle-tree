@@ -1,7 +1,13 @@
+use super::fixtures::{Case, Proof, FIXTURES_DIR};
 use crate::traits::Hasher;
 use crate::{default_store::DefaultStore, SparseMerkleTree, H256};
+use anyhow::Result as AnyResult;
 use blake2b_rs::{Blake2b, Blake2bBuilder};
 use core::ffi::c_void;
+use proptest::prelude::*;
+use rand::prelude::Rng;
+use std::collections::HashMap;
+use std::fs;
 
 #[link(name = "dl-c-impl", kind = "static")]
 extern "C" {
@@ -134,4 +140,166 @@ pub fn new_ckb_smt(pairs: Vec<(H256, H256)>) -> CkbSMT {
         smt.update(key, value).unwrap();
     }
     smt
+}
+
+fn h256_by_u8(n: u8) -> [u8; 32] {
+    let mut data = [0u8; 32];
+    data[31] = n;
+    data
+}
+
+#[test]
+fn test_normalize() {
+    // pushed key = 7, value = 1
+    // pushed key = 1, value = 1
+    // pushed key = 1, value = 2
+    // pushed key = 2, value = 1
+    // pushed key = 2, value = 2
+    // pushed key = 0, value = 1
+    // pushed key = 0, value = 2
+    // pushed key = 6, value = 1
+    let mut smt_state = SmtCImpl::new(256);
+    let data_set = [
+        (7, 1),
+        (1, 1),
+        (1, 2),
+        (2, 1),
+        (2, 2),
+        (0, 1),
+        (0, 2),
+        (6, 1),
+    ];
+    for (k, v) in &data_set {
+        smt_state.insert(&h256_by_u8(*k), &h256_by_u8(*v)).unwrap();
+    }
+    assert_eq!(smt_state.len() as usize, data_set.len());
+    smt_state.normalize();
+    assert_eq!(smt_state.len(), 5);
+    for (k, v) in &[(0, 2), (1, 2), (2, 2), (6, 1), (7, 1)] {
+        assert_eq!(smt_state.fetch(&h256_by_u8(*k)).unwrap(), h256_by_u8(*v));
+    }
+}
+
+#[test]
+fn test_normalize_random() {
+    let mut rng = rand::thread_rng();
+    for pair_size in vec![1, 2, 100, 256, 512, 1024, 2048] {
+        for _ in 0..4 {
+            let mut final_map: HashMap<u8, u8> = HashMap::default();
+            let mut smt_state = SmtCImpl::new(pair_size);
+            let rand_pairs: Vec<(u8, u8)> =
+                (0..pair_size).map(|_| (rng.gen(), rng.gen())).collect();
+            for (key, value) in &rand_pairs {
+                final_map.insert(*key, *value);
+                smt_state
+                    .insert(&h256_by_u8(*key), &h256_by_u8(*value))
+                    .unwrap();
+            }
+            assert_eq!(smt_state.len(), pair_size);
+            smt_state.normalize();
+            assert_eq!(smt_state.len() as usize, final_map.len());
+            for (key, value) in &final_map {
+                let byte32_value = smt_state.fetch(&h256_by_u8(*key)).unwrap();
+                assert_eq!(h256_by_u8(*value), byte32_value);
+            }
+        }
+    }
+}
+
+fn run_test_case(case: Case) -> AnyResult<()> {
+    let Case { leaves, proofs, .. } = case;
+
+    let ckb_smt = new_ckb_smt(
+        leaves
+            .iter()
+            .map(|(k, v)| ((*k).into(), (*v).into()))
+            .collect(),
+    );
+
+    for proof in proofs {
+        let Proof { leaves, error, .. } = proof;
+        let keys: Vec<_> = leaves.iter().map(|(k, _v)| (*k).into()).collect();
+        let ckb_actual_proof = match ckb_smt.merkle_proof(keys) {
+            Ok(proof) => proof,
+            Err(err) => {
+                let expected_error = error.expect("expected error");
+                assert_eq!(expected_error, format!("{}", err));
+                return Ok(());
+            }
+        };
+        let ckb_actual_compiled_proof = ckb_actual_proof.clone().compile(
+            leaves
+                .iter()
+                .map(|(k, v)| ((*k).into(), (*v).into()))
+                .collect(),
+        )?;
+        let ckb_actual_compiled_proof_bin: Vec<u8> = ckb_actual_compiled_proof.clone().into();
+
+        let mut smt_state = SmtCImpl::new(leaves.len() as u32);
+        for (key, value) in &leaves {
+            smt_state.insert(key, value).unwrap();
+        }
+        for (key, value) in &leaves {
+            let fetched_value = smt_state.fetch(key).unwrap();
+            assert_eq!(value, &fetched_value);
+        }
+        smt_state.normalize();
+        for (key, value) in &leaves {
+            let fetched_value = smt_state.fetch(key).unwrap();
+            assert_eq!(value, &fetched_value);
+        }
+
+        assert_eq!(smt_state.len(), leaves.len() as u32);
+        smt_state
+            .verify(ckb_smt.root().as_slice(), &ckb_actual_compiled_proof_bin)
+            .unwrap();
+    }
+    Ok(())
+}
+
+#[test]
+fn test_fixtures() {
+    for i in 0..100 {
+        let path = format!("{}/basic/case-{}.json", FIXTURES_DIR, i);
+        let content = fs::read(&path).expect("read");
+        let case: Case = serde_json::from_slice(&content).expect("parse json");
+        run_test_case(case).expect("test case c impl");
+        println!("pass {}", i);
+    }
+}
+
+fn test_merkle_proof(key: H256, value: H256) {
+    const EXPECTED_PROOF_SIZE: usize = 16;
+
+    let mut tree = CkbSMT::default();
+    tree.update(key, value).expect("update");
+    if !tree.is_empty() {
+        let proof = tree.merkle_proof(vec![key]).expect("proof");
+        let compiled_proof = proof
+            .clone()
+            .compile(vec![(key, value)])
+            .expect("compile proof");
+        assert!(proof.proof().len() < EXPECTED_PROOF_SIZE);
+        assert!(proof
+            .verify::<CkbBlake2bHasher>(tree.root(), vec![(key, value)])
+            .expect("verify"));
+        assert!(compiled_proof
+            .verify::<CkbBlake2bHasher>(tree.root(), vec![(key, value)])
+            .expect("compiled verify"));
+
+        let compiled_proof_bin: Vec<u8> = compiled_proof.into();
+        let mut smt_state = SmtCImpl::new(8);
+        smt_state.insert(key.as_slice(), value.as_slice()).unwrap();
+        smt_state.normalize();
+        smt_state
+            .verify(tree.root().as_slice(), &compiled_proof_bin)
+            .unwrap();
+    }
+}
+
+proptest! {
+    #[test]
+    fn test_random_merkle_proof(key: [u8; 32], value: [u8;32]) {
+        test_merkle_proof(key.into(), value.into());
+    }
 }

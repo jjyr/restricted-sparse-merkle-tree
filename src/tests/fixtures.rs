@@ -1,25 +1,24 @@
-use std::fs;
-
 use crate::{blake2b::Blake2bHasher, default_store::DefaultStore, SparseMerkleTree, H256};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::fs;
 // use rand::{prelude::SliceRandom, thread_rng, Rng};
 
-type Leave = ([u8; 32], [u8; 32]);
+pub type Leave = ([u8; 32], [u8; 32]);
 
 #[derive(Default, Serialize, Deserialize)]
-struct Proof {
-    leaves: Vec<Leave>,
-    compiled_proof: Vec<u8>,
-    error: Option<String>,
+pub struct Proof {
+    pub leaves: Vec<Leave>,
+    pub compiled_proof: Vec<u8>,
+    pub error: Option<String>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
-struct Case {
-    name: String,
-    leaves: Vec<Leave>,
-    root: [u8; 32],
-    proofs: Vec<Proof>,
+pub struct Case {
+    pub name: String,
+    pub leaves: Vec<Leave>,
+    pub root: [u8; 32],
+    pub proofs: Vec<Proof>,
 }
 
 type SMT = SparseMerkleTree<Blake2bHasher, H256, DefaultStore<H256>>;
@@ -162,61 +161,7 @@ fn run_test_case(case: Case) -> Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "c_smt_impl")]
-fn run_test_case_c_impl(case: Case) -> Result<()> {
-    use super::c_smt::{new_ckb_smt, SmtCImpl};
-
-    let Case { leaves, proofs, .. } = case;
-
-    let ckb_smt = new_ckb_smt(
-        leaves
-            .iter()
-            .map(|(k, v)| ((*k).into(), (*v).into()))
-            .collect(),
-    );
-
-    for proof in proofs {
-        let Proof { leaves, error, .. } = proof;
-        let keys: Vec<_> = leaves.iter().map(|(k, _v)| (*k).into()).collect();
-        let ckb_actual_proof = match ckb_smt.merkle_proof(keys) {
-            Ok(proof) => proof,
-            Err(err) => {
-                let expected_error = error.expect("expected error");
-                assert_eq!(expected_error, format!("{}", err));
-                return Ok(());
-            }
-        };
-        let ckb_actual_compiled_proof = ckb_actual_proof.clone().compile(
-            leaves
-                .iter()
-                .map(|(k, v)| ((*k).into(), (*v).into()))
-                .collect(),
-        )?;
-        let ckb_actual_compiled_proof_bin: Vec<u8> = ckb_actual_compiled_proof.clone().into();
-
-        let mut smt_state = SmtCImpl::new(leaves.len() as u32);
-        for (key, value) in &leaves {
-            smt_state.insert(key, value).unwrap();
-        }
-        for (key, value) in &leaves {
-            let fetched_value = smt_state.fetch(key).unwrap();
-            assert_eq!(value, &fetched_value);
-        }
-        smt_state.normalize();
-        for (key, value) in &leaves {
-            let fetched_value = smt_state.fetch(key).unwrap();
-            assert_eq!(value, &fetched_value);
-        }
-
-        assert_eq!(smt_state.len(), leaves.len() as u32);
-        smt_state
-            .verify(ckb_smt.root().as_slice(), &ckb_actual_compiled_proof_bin)
-            .unwrap();
-    }
-    Ok(())
-}
-
-const FIXTURES_DIR: &str = "fixtures";
+pub const FIXTURES_DIR: &str = "fixtures";
 
 #[test]
 fn test_fixtures() {
@@ -225,18 +170,6 @@ fn test_fixtures() {
         let content = fs::read(&path).expect("read");
         let case: Case = serde_json::from_slice(&content).expect("parse json");
         run_test_case(case).expect("test case");
-        println!("pass {}", i);
-    }
-}
-
-#[cfg(feature = "c_smt_impl")]
-#[test]
-fn test_fixtures_c_impl() {
-    for i in 0..100 {
-        let path = format!("{}/basic/case-{}.json", FIXTURES_DIR, i);
-        let content = fs::read(&path).expect("read");
-        let case: Case = serde_json::from_slice(&content).expect("parse json");
-        run_test_case_c_impl(case).expect("test case c impl");
         println!("pass {}", i);
     }
 }
