@@ -9,7 +9,7 @@ use crate::{
 
 type Range = core::ops::Range<usize>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MerkleProof {
     leaves_path: Vec<Vec<u8>>,
     proof: Vec<(H256, u8)>,

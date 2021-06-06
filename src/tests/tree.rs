@@ -473,17 +473,31 @@ proptest! {
     }
 
     #[test]
-    fn test_smt_random_insert_order((pairs, _n) in leaves(5, 30)){
+    fn test_smt_random_insert_order((pairs, _n) in leaves(5, 50)){
         let smt = new_smt(pairs.clone());
         let root = *smt.root();
 
         let mut pairs = pairs;
         let mut rng = rand::thread_rng();
-        for _i in 0..10 {
+        for _i in 0..30 {
+            // shuffle
             pairs.shuffle(&mut rng);
-            let smt = new_smt(pairs.clone());
-            let current_root = *smt.root();
-            assert_eq!(root, current_root);
+
+            // insert to smt in random order
+            let smt2 = new_smt(pairs.clone());
+            assert_eq!(root, *smt2.root());
+
+            // check leaves
+            for (k, v) in &pairs {
+                assert_eq!(&smt2.get(k).unwrap(), v, "key value must be consisted");
+
+                let origin_proof = smt.merkle_proof(vec![*k]).unwrap();
+                let proof = smt2.merkle_proof(vec![*k]).unwrap();
+                assert_eq!(origin_proof, proof, "merkle proof must be consisted");
+
+                let calculated_root = proof.compute_root::<Blake2bHasher>(vec![(*k, *v)]).unwrap();
+                assert_eq!(root, calculated_root, "root must be consisted");
+            }
         }
     }
 
