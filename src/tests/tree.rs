@@ -656,3 +656,60 @@ fn test_v0_3_broken_sample() {
     smt.update(k3.into(), v3.into()).unwrap();
     assert_eq!(smt.get(&k1.into()).unwrap(), v1.into());
 }
+
+#[test]
+fn test_replay_to_pass_proof() {
+    let key1: H256 = [
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0,
+    ]
+    .into();
+    let key2: H256 = [
+        2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0,
+    ]
+    .into();
+    let key3: H256 = [
+        3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0,
+    ]
+    .into();
+    let key4: H256 = [
+        4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0,
+    ]
+    .into();
+
+    let existing: H256 = [
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0,
+    ]
+    .into();
+    let non_existing: H256 = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0,
+    ]
+    .into();
+    let pairs = vec![
+        (key1, existing),
+        (key2, non_existing),
+        (key3, non_existing),
+        (key4, non_existing),
+    ];
+    let smt = new_smt(pairs.clone());
+    let leaf_a_bl = vec![(key1, H256::zero())];
+    let leaf_c = vec![pairs[2]];
+    let proofc = smt
+        .merkle_proof(leaf_c.clone().into_iter().map(|(k, _)| k).collect())
+        .expect("gen proof");
+    // merkle proof, leaf is faked
+    assert!(!proofc
+        .clone()
+        .verify::<Blake2bHasher>(smt.root(), leaf_a_bl.clone())
+        .expect("verify"));
+    // compiled merkle proof, leaf is faked
+    let compiled_proof = proofc.compile(leaf_c).expect("compile proof");
+    assert!(!compiled_proof
+        .verify::<Blake2bHasher>(smt.root(), leaf_a_bl)
+        .expect("verify compiled proof"));
+}
