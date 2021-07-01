@@ -132,14 +132,7 @@ fn run_test_case(case: Case) -> Result<()> {
         } = proof;
         let keys = leaves.iter().map(|(k, _v)| (*k).into()).collect();
         let actual_compiled_proof: Vec<u8> = match smt.merkle_proof(keys) {
-            Ok(proof) => proof
-                .compile(
-                    leaves
-                        .iter()
-                        .map(|(k, v)| ((*k).into(), (*v).into()))
-                        .collect(),
-                )?
-                .into(),
+            Ok(proof) => proof.compile().into(),
             Err(err) => {
                 let expected_error = error.expect("expected error");
                 assert_eq!(expected_error, format!("{}", err));

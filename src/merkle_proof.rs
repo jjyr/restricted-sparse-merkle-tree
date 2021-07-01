@@ -1,5 +1,4 @@
 use crate::{
-    collections::{BTreeMap, VecDeque},
     error::{Error, Result},
     merge::{hash_leaf, merge},
     traits::Hasher,
@@ -7,24 +6,24 @@ use crate::{
     H256,
 };
 
-type Range = core::ops::Range<usize>;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MerkleProof {
-    leaves_path: Vec<Vec<u8>>,
-    proof: Vec<(H256, u8)>,
+    // leaf path represented by bitmap
+    leaves_path: Vec<H256>,
+    // needed sibling node hash
+    proof: Vec<H256>,
 }
 
 impl MerkleProof {
     /// Create MerkleProof
     /// leaves_path: contains height of non-zero siblings
     /// proof: contains merkle path for each leaves it's height
-    pub fn new(leaves_path: Vec<Vec<u8>>, proof: Vec<(H256, u8)>) -> Self {
+    pub fn new(leaves_path: Vec<H256>, proof: Vec<H256>) -> Self {
         MerkleProof { leaves_path, proof }
     }
 
     /// Destruct the structure, useful for serialization
-    pub fn take(self) -> (Vec<Vec<u8>>, Vec<(H256, u8)>) {
+    pub fn take(self) -> (Vec<H256>, Vec<H256>) {
         let MerkleProof { leaves_path, proof } = self;
         (leaves_path, proof)
     }
@@ -35,92 +34,29 @@ impl MerkleProof {
     }
 
     /// return the inner leaves_path vector
-    pub fn leaves_path(&self) -> &Vec<Vec<u8>> {
+    pub fn leaves_path(&self) -> &Vec<H256> {
         &self.leaves_path
     }
 
     /// return proof merkle path
-    pub fn proof(&self) -> &Vec<(H256, u8)> {
+    pub fn proof(&self) -> &Vec<H256> {
         &self.proof
     }
 
     /// convert merkle proof into CompiledMerkleProof
-    pub fn compile(self, mut leaves: Vec<(H256, H256)>) -> Result<CompiledMerkleProof> {
-        if leaves.is_empty() {
-            return Err(Error::EmptyKeys);
-        } else if leaves.len() != self.leaves_count() {
-            return Err(Error::IncorrectNumberOfLeaves {
-                expected: self.leaves_count(),
-                actual: leaves.len(),
-            });
-        }
-
+    pub fn compile(self) -> CompiledMerkleProof {
         let (leaves_path, proof) = self.take();
-        let mut leaves_path: Vec<VecDeque<_>> = leaves_path.into_iter().map(Into::into).collect();
-        let mut proof: VecDeque<_> = proof.into();
-
-        // sort leaves
-        leaves.sort_unstable_by_key(|(k, _v)| *k);
-        // tree_buf: (height, key) -> (key_index, node)
-        let mut tree_buf: BTreeMap<_, _> = leaves
-            .into_iter()
-            .enumerate()
-            .map(|(i, (k, _v))| ((0, k), (i, leaf_program(i))))
-            .collect();
-        // rebuild the tree from bottom to top
-        while !tree_buf.is_empty() {
-            // pop_front from tree_buf, the API is unstable
-            let &(mut height, key) = tree_buf.keys().next().unwrap();
-            let (leaf_index, program) = tree_buf.remove(&(height, key)).unwrap();
-
-            if proof.is_empty() && tree_buf.is_empty() {
-                return Ok(CompiledMerkleProof(program.0));
-            }
-
-            let mut sibling_key = key.parent_path(height);
-            if !key.get_bit(height) {
-                sibling_key.set_bit(height)
-            }
-
-            let (parent_key, parent_program, height) =
-                if Some(&(height, sibling_key)) == tree_buf.keys().next() {
-                    let (_leaf_index, sibling_program) = tree_buf
-                        .remove(&(height, sibling_key))
-                        .expect("pop sibling");
-                    let parent_key = key.parent_path(height);
-                    let parent_program = merge_program(&program, &sibling_program, height)?;
-                    (parent_key, parent_program, height)
-                } else {
-                    let merge_height = leaves_path[leaf_index].front().copied().unwrap_or(height);
-                    if height != merge_height {
-                        let parent_key = key.copy_bits(merge_height);
-                        // skip zeros
-                        tree_buf.insert((merge_height, parent_key), (leaf_index, program));
-                        continue;
-                    }
-                    let (proof, proof_height) = proof.pop_front().ok_or(Error::CorruptedProof)?;
-                    let proof_height = proof_height;
-                    if height < proof_height {
-                        height = proof_height;
-                    }
-
-                    let parent_key = key.parent_path(height);
-                    let parent_program = proof_program(&program, proof, height);
-                    (parent_key, parent_program, height)
-                };
-
-            if height == core::u8::MAX {
-                if proof.is_empty() {
-                    return Ok(CompiledMerkleProof(parent_program.0));
-                } else {
-                    return Err(Error::CorruptedProof);
-                }
-            }
-            leaves_path[leaf_index].pop_front();
-            tree_buf.insert((height + 1, parent_key), (leaf_index, parent_program));
+        let leaves_len = leaves_path.len();
+        let mut data = vec![0u8; (leaves_len + proof.len()) * 32];
+        for (idx, path) in leaves_path.into_iter().enumerate() {
+            let offset = idx * 32;
+            data[offset..offset + 32].copy_from_slice(path.as_slice());
         }
-
-        Err(Error::CorruptedProof)
+        for (idx, sibling_node_hash) in proof.into_iter().enumerate() {
+            let offset = (leaves_len + idx) * 32;
+            data[offset..offset + 32].copy_from_slice(sibling_node_hash.as_slice());
+        }
+        CompiledMerkleProof(data)
     }
 
     /// Compute root from proof
@@ -137,75 +73,82 @@ impl MerkleProof {
                 actual: leaves.len(),
             });
         }
-
-        let (leaves_path, proof) = self.take();
-        let mut leaves_path: Vec<VecDeque<_>> = leaves_path.into_iter().map(Into::into).collect();
-        let mut proof: VecDeque<_> = proof.into();
-
         // sort leaves
         leaves.sort_unstable_by_key(|(k, _v)| *k);
-        // tree_buf: (height, key) -> (key_index, node)
-        let mut tree_buf: BTreeMap<_, _> = leaves
+
+        let (leaves_path, proof) = self.take();
+
+        let mut proof_index = 0;
+        // (path_index, key, node_hash)
+        let mut current_nodes: Vec<(usize, H256, H256)> = leaves
             .into_iter()
             .enumerate()
-            .map(|(i, (k, v))| ((0, k), (i, hash_leaf::<H>(&k, &v))))
+            .map(|(path_idx, (key, value))| (path_idx, key, hash_leaf::<H>(&key, &value)))
             .collect();
-        // rebuild the tree from bottom to top
-        while !tree_buf.is_empty() {
-            // pop_front from tree_buf, the API is unstable
-            let (&(mut height, key), &(leaf_index, node)) = tree_buf.iter().next().unwrap();
-            tree_buf.remove(&(height, key));
+        let mut next_nodes: Vec<(usize, H256, H256)> = Default::default();
+        for height in 0..=core::u8::MAX {
+            let mut key_idx = 0;
+            while key_idx < current_nodes.len() {
+                let (path_idx_a, key_a, node_a) = current_nodes[key_idx];
+                let parent_key_a = key_a.parent_path(height);
 
-            if proof.is_empty() && tree_buf.is_empty() {
-                return Ok(node);
-            }
-
-            let mut sibling_key = key.parent_path(height);
-            if !key.get_bit(height) {
-                sibling_key.set_bit(height)
-            }
-            let (sibling, sibling_height) =
-                if Some(&(height, sibling_key)) == tree_buf.keys().next() {
-                    let (_leaf_index, sibling) = tree_buf
-                        .remove(&(height, sibling_key))
-                        .expect("pop sibling");
-                    (sibling, height)
-                } else {
-                    let merge_height = leaves_path[leaf_index].front().copied().unwrap_or(height);
-                    if height != merge_height {
-                        let parent_key = key.copy_bits(merge_height);
-                        // skip zeros
-                        tree_buf.insert((merge_height, parent_key), (leaf_index, node));
-                        continue;
+                let mut non_sibling_nodes = Vec::with_capacity(2);
+                if key_idx + 1 < current_nodes.len() {
+                    let (path_idx_b, key_b, node_b) = current_nodes[key_idx + 1];
+                    let parent_key_b = key_b.parent_path(height);
+                    if parent_key_a == parent_key_b {
+                        let parent_node = merge::<H>(height, &parent_key_a, &node_a, &node_b);
+                        next_nodes.push((path_idx_a, key_a, parent_node));
+                        key_idx += 2;
+                    } else {
+                        non_sibling_nodes.push((path_idx_a, key_a, node_a, parent_key_a));
+                        if key_idx + 2 == current_nodes.len() {
+                            non_sibling_nodes.push((path_idx_b, key_b, node_b, parent_key_b));
+                        }
                     }
-                    let (node, height) = proof.pop_front().ok_or(Error::CorruptedProof)?;
-                    (node, height)
-                };
-            if height < sibling_height {
-                height = sibling_height;
-            }
-            // skip zero merkle path
-            let parent_key = key.parent_path(height);
-
-            let parent = if key.get_bit(height) {
-                merge::<H>(&sibling, &node)
-            } else {
-                merge::<H>(&node, &sibling)
-            };
-
-            if height == core::u8::MAX {
-                if proof.is_empty() {
-                    return Ok(parent);
                 } else {
-                    return Err(Error::CorruptedProof);
+                    non_sibling_nodes.push((path_idx_a, key_a, node_a, parent_key_a));
                 }
-            } else {
-                leaves_path[leaf_index].pop_front();
-                tree_buf.insert((height + 1, parent_key), (leaf_index, parent));
+
+                for (path_idx, current_key, current_node, parent_key) in
+                    non_sibling_nodes.into_iter()
+                {
+                    let path = leaves_path[path_idx];
+                    let none_zero_sibling = path.get_bit(height);
+                    let is_right = current_key.is_right(height);
+                    let (left, right) = if none_zero_sibling {
+                        if proof_index == proof.len() {
+                            return Err(Error::CorruptedProof);
+                        }
+                        let sibling_node = proof[proof_index];
+                        proof_index += 1;
+                        if is_right {
+                            (sibling_node, current_node)
+                        } else {
+                            (current_node, sibling_node)
+                        }
+                    } else if is_right {
+                        (H256::zero(), current_node)
+                    } else {
+                        (current_node, H256::zero())
+                    };
+                    let node_hash = merge::<H>(height, &parent_key, &left, &right);
+                    next_nodes.push((path_idx, current_key, node_hash));
+                    key_idx += 1;
+                }
             }
+            current_nodes = core::mem::take(&mut next_nodes);
         }
 
-        Err(Error::CorruptedProof)
+        if proof_index != proof.len() {
+            return Err(Error::CorruptedProof);
+        }
+
+        if current_nodes.len() != 1 {
+            Err(Error::CorruptedProof)
+        } else {
+            Ok(current_nodes[0].2)
+        }
     }
 
     /// Verify merkle proof
@@ -220,156 +163,34 @@ impl MerkleProof {
     }
 }
 
-fn leaf_program(leaf_index: usize) -> (Vec<u8>, Option<Range>) {
-    let mut program = Vec::with_capacity(1);
-    program.push(0x4C);
-    (
-        program,
-        Some(Range {
-            start: leaf_index,
-            end: leaf_index + 1,
-        }),
-    )
-}
-
-fn proof_program(
-    child: &(Vec<u8>, Option<Range>),
-    proof: H256,
-    height: u8,
-) -> (Vec<u8>, Option<Range>) {
-    let (child_program, child_range) = child;
-    let mut program = Vec::new();
-    program.resize(34 + child_program.len(), 0x50);
-    program[..child_program.len()].copy_from_slice(child_program);
-    program[child_program.len() + 1] = height;
-    program[child_program.len() + 2..].copy_from_slice(proof.as_slice());
-    (program, child_range.clone())
-}
-
-fn merge_program(
-    a: &(Vec<u8>, Option<Range>),
-    b: &(Vec<u8>, Option<Range>),
-    height: u8,
-) -> Result<(Vec<u8>, Option<Range>)> {
-    let (a_program, a_range) = a;
-    let (b_program, b_range) = b;
-    let (a_comes_first, range) = if a_range.is_none() || b_range.is_none() {
-        let range = if a_range.is_none() { b_range } else { a_range }
-            .clone()
-            .unwrap();
-        (true, range)
-    } else {
-        let a_range = a_range.clone().unwrap();
-        let b_range = b_range.clone().unwrap();
-        if a_range.end == b_range.start {
-            (
-                true,
-                Range {
-                    start: a_range.start,
-                    end: b_range.end,
-                },
-            )
-        } else {
-            return Err(Error::NonMergableRange);
-        }
-    };
-    let mut program = Vec::new();
-    program.resize(2 + a_program.len() + b_program.len(), 0x48);
-    if a_comes_first {
-        program[..a_program.len()].copy_from_slice(a_program);
-        program[a_program.len()..a_program.len() + b_program.len()].copy_from_slice(b_program);
-    } else {
-        program[..b_program.len()].copy_from_slice(b_program);
-        program[b_program.len()..a_program.len() + b_program.len()].copy_from_slice(a_program);
-    }
-    program[a_program.len() + b_program.len() + 1] = height;
-    Ok((program, Some(range)))
-}
-
 /// An structure optimized for verify merkle proof
 #[derive(Debug, Clone)]
 pub struct CompiledMerkleProof(pub Vec<u8>);
 
 impl CompiledMerkleProof {
-    pub fn compute_root<H: Hasher + Default>(&self, mut leaves: Vec<(H256, H256)>) -> Result<H256> {
-        leaves.sort_unstable_by_key(|(k, _v)| *k);
-        let mut program_index = 0;
-        let mut leave_index = 0;
-        let mut stack = Vec::new();
-        while program_index < self.0.len() {
-            let code = self.0[program_index];
-            program_index += 1;
-            match code {
-                // L
-                0x4C => {
-                    if leave_index >= leaves.len() {
-                        return Err(Error::CorruptedStack);
-                    }
-                    let (k, v) = leaves[leave_index];
-                    stack.push((k, hash_leaf::<H>(&k, &v)));
-                    leave_index += 1;
-                }
-                // P
-                0x50 => {
-                    if stack.is_empty() {
-                        return Err(Error::CorruptedStack);
-                    }
-                    if program_index + 33 > self.0.len() {
-                        return Err(Error::CorruptedProof);
-                    }
-                    let height = self.0[program_index];
-                    program_index += 1;
-                    let mut data = [0u8; 32];
-                    data.copy_from_slice(&self.0[program_index..program_index + 32]);
-                    program_index += 32;
-                    let proof = H256::from(data);
-                    let (key, value) = stack.pop().unwrap();
-                    let parent_key = key.parent_path(height);
-                    let parent = if key.get_bit(height) {
-                        merge::<H>(&proof, &value)
-                    } else {
-                        merge::<H>(&value, &proof)
-                    };
-                    stack.push((parent_key, parent));
-                }
-                // H
-                0x48 => {
-                    if stack.len() < 2 {
-                        return Err(Error::CorruptedStack);
-                    }
-                    if program_index >= self.0.len() {
-                        return Err(Error::CorruptedProof);
-                    }
-                    let height = self.0[program_index];
-                    program_index += 1;
-                    let (key_b, value_b) = stack.pop().unwrap();
-                    let (key_a, value_a) = stack.pop().unwrap();
-                    let parent_key_a = key_a.copy_bits(height);
-                    let parent_key_b = key_b.copy_bits(height);
-                    let a_set = key_a.get_bit(height);
-                    let b_set = key_b.get_bit(height);
-                    let mut sibling_key_a = parent_key_a;
-                    if !a_set {
-                        sibling_key_a.set_bit(height);
-                    }
-                    // Test if a and b are siblings
-                    if !(sibling_key_a == parent_key_b && (a_set ^ b_set)) {
-                        return Err(Error::NonSiblings);
-                    }
-                    let parent = if key_a.get_bit(height) {
-                        merge::<H>(&value_b, &value_a)
-                    } else {
-                        merge::<H>(&value_a, &value_b)
-                    };
-                    stack.push((parent_key_a, parent));
-                }
-                _ => return Err(Error::InvalidCode(code)),
-            }
+    pub fn compute_root<H: Hasher + Default>(&self, leaves: Vec<(H256, H256)>) -> Result<H256> {
+        if self.0.len() % 32 != 0 {
+            return Err(Error::CorruptedProof);
         }
-        if stack.len() != 1 {
-            return Err(Error::CorruptedStack);
+        if self.0.len() / 32 < leaves.len() {
+            return Err(Error::CorruptedProof);
         }
-        Ok(stack[0].1)
+
+        let sibling_node_size = self.0.len() / 32 - leaves.len();
+        let mut data = [0u8; 32];
+        let mut leaves_path = Vec::with_capacity(leaves.len());
+        let mut proof = Vec::with_capacity(sibling_node_size);
+        for idx in 0..leaves.len() {
+            let offset = idx * 32;
+            data.copy_from_slice(&self.0[offset..offset + 32]);
+            leaves_path.push(H256::from(data));
+        }
+        for idx in 0..sibling_node_size {
+            let offset = (idx + leaves.len()) * 32;
+            data.copy_from_slice(&self.0[offset..offset + 32]);
+            proof.push(H256::from(data));
+        }
+        MerkleProof::new(leaves_path, proof).compute_root::<H>(leaves)
     }
 
     pub fn verify<H: Hasher + Default>(
