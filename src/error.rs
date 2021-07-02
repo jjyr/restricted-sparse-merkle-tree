@@ -11,6 +11,7 @@ pub enum Error {
     EmptyKeys,
     IncorrectNumberOfLeaves { expected: usize, actual: usize },
     Store(string::String),
+    ForbidZeroValueLeaf,
     CorruptedStack,
     NonSiblings,
     InvalidCode(u8),
@@ -47,6 +48,9 @@ impl core::fmt::Display for Error {
             }
             Error::CorruptedStack => {
                 write!(f, "Corrupted compiled proof stack")?;
+            }
+            Error::ForbidZeroValueLeaf => {
+                write!(f, "Zero value leaf is not allowed to verify proof")?;
             }
             Error::NonSiblings => {
                 write!(f, "Merging non-siblings in compiled stack")?;

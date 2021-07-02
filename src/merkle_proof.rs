@@ -142,6 +142,13 @@ impl MerkleProof {
         let mut leaves_path: Vec<VecDeque<_>> = leaves_path.into_iter().map(Into::into).collect();
         let mut proof: VecDeque<_> = proof.into();
 
+        // Deny non-inclusion proof
+        for (_k, v) in &leaves {
+            if v.is_zero() {
+                return Err(Error::ForbidZeroValueLeaf);
+            }
+        }
+
         // sort leaves
         leaves.sort_unstable_by_key(|(k, _v)| *k);
         // tree_buf: (height, key) -> (key_index, node)
@@ -306,6 +313,12 @@ impl CompiledMerkleProof {
                         return Err(Error::CorruptedStack);
                     }
                     let (k, v) = leaves[leave_index];
+
+                    // Deny non-inclusion proof
+                    if v.is_zero() {
+                        return Err(Error::ForbidZeroValueLeaf);
+                    }
+
                     stack.push((k, hash_leaf::<H>(&k, &v)));
                     leave_index += 1;
                 }
