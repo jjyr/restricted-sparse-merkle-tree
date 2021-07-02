@@ -33,10 +33,10 @@ fn test_default_tree() {
     let tree = SMT::default();
     assert_eq!(tree.get(&H256::zero()).expect("get"), H256::zero());
     let proof = tree.merkle_proof(vec![H256::zero()]).expect("merkle proof");
-    let root = proof
-        .compute_root::<Blake2bHasher>(vec![(H256::zero(), H256::zero())])
-        .expect("root");
-    assert_eq!(&root, tree.root());
+    assert_eq!(
+        proof.compute_root::<Blake2bHasher>(vec![(H256::zero(), H256::zero())]),
+        Err(Error::ForbidZeroValueLeaf)
+    );
     let proof = tree.merkle_proof(vec![H256::zero()]).expect("merkle proof");
     let root2 = proof
         .compute_root::<Blake2bHasher>(vec![(H256::zero(), [42u8; 32].into())])
@@ -444,8 +444,8 @@ proptest! {
         let proof = smt.merkle_proof(non_exists_keys.clone()).expect("gen proof");
         let data: Vec<(H256, H256)> = non_exists_keys.into_iter().map(|k|(k, H256::zero())).collect();
         let compiled_proof = proof.clone().compile(data.clone()).expect("compile proof");
-        assert!(proof.verify::<Blake2bHasher>(smt.root(), data.clone()).expect("verify proof"));
-        assert!(compiled_proof.verify::<Blake2bHasher>(smt.root(), data).expect("verify compiled proof"));
+        assert_eq!(proof.verify::<Blake2bHasher>(smt.root(), data.clone()), Err(Error::ForbidZeroValueLeaf));
+        assert_eq!(compiled_proof.verify::<Blake2bHasher>(smt.root(), data), Err(Error::ForbidZeroValueLeaf));
     }
 
     #[test]
@@ -460,8 +460,8 @@ proptest! {
         let proof = smt.merkle_proof(keys.clone()).expect("gen proof");
         let data: Vec<(H256, H256)> = keys.into_iter().map(|k|(k, smt.get(&k).expect("get"))).collect();
         let compiled_proof = proof.clone().compile(data.clone()).expect("compile proof");
-        assert!(proof.verify::<Blake2bHasher>(smt.root(), data.clone()).expect("verify proof"));
-        assert!(compiled_proof.verify::<Blake2bHasher>(smt.root(), data).expect("verify compiled proof"));
+        assert_eq!(proof.verify::<Blake2bHasher>(smt.root(), data.clone()), Err(Error::ForbidZeroValueLeaf));
+        assert_eq!(compiled_proof.verify::<Blake2bHasher>(smt.root(), data), Err(Error::ForbidZeroValueLeaf));
     }
 
     #[test]
@@ -703,13 +703,16 @@ fn test_replay_to_pass_proof() {
         .merkle_proof(leaf_c.clone().into_iter().map(|(k, _)| k).collect())
         .expect("gen proof");
     // merkle proof, leaf is faked
-    assert!(!proofc
-        .clone()
-        .verify::<Blake2bHasher>(smt.root(), leaf_a_bl.clone())
-        .expect("verify"));
+    assert_eq!(
+        proofc
+            .clone()
+            .verify::<Blake2bHasher>(smt.root(), leaf_a_bl.clone()),
+        Err(Error::ForbidZeroValueLeaf)
+    );
     // compiled merkle proof, leaf is faked
     let compiled_proof = proofc.compile(leaf_c).expect("compile proof");
-    assert!(!compiled_proof
-        .verify::<Blake2bHasher>(smt.root(), leaf_a_bl)
-        .expect("verify compiled proof"));
+    assert_eq!(
+        compiled_proof.verify::<Blake2bHasher>(smt.root(), leaf_a_bl),
+        Err(Error::ForbidZeroValueLeaf)
+    );
 }
