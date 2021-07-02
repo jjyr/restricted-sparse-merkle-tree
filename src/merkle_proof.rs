@@ -8,34 +8,40 @@ use crate::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MerkleProof {
-    // leaf path represented by bitmap
-    leaves_path: Vec<H256>,
+    // leaf bitmap, bitmap.get_bit(height) is true means there need a non zero sibling in this height
+    leaves_bitmap: Vec<H256>,
     // needed sibling node hash
     proof: Vec<H256>,
 }
 
 impl MerkleProof {
     /// Create MerkleProof
-    /// leaves_path: contains height of non-zero siblings
-    /// proof: contains merkle path for each leaves it's height
-    pub fn new(leaves_path: Vec<H256>, proof: Vec<H256>) -> Self {
-        MerkleProof { leaves_path, proof }
+    /// leaves_bitmap: leaf bitmap, bitmap.get_bit(height) is true means there need a non zero sibling in this height
+    /// proof: needed sibling node hash
+    pub fn new(leaves_bitmap: Vec<H256>, proof: Vec<H256>) -> Self {
+        MerkleProof {
+            leaves_bitmap,
+            proof,
+        }
     }
 
     /// Destruct the structure, useful for serialization
     pub fn take(self) -> (Vec<H256>, Vec<H256>) {
-        let MerkleProof { leaves_path, proof } = self;
-        (leaves_path, proof)
+        let MerkleProof {
+            leaves_bitmap,
+            proof,
+        } = self;
+        (leaves_bitmap, proof)
     }
 
     /// number of leaves required by this merkle proof
     pub fn leaves_count(&self) -> usize {
-        self.leaves_path.len()
+        self.leaves_bitmap.len()
     }
 
-    /// return the inner leaves_path vector
-    pub fn leaves_path(&self) -> &Vec<H256> {
-        &self.leaves_path
+    /// return the inner leaves_bitmap vector
+    pub fn leaves_bitmap(&self) -> &Vec<H256> {
+        &self.leaves_bitmap
     }
 
     /// return proof merkle path
@@ -45,12 +51,12 @@ impl MerkleProof {
 
     /// convert merkle proof into CompiledMerkleProof
     pub fn compile(self) -> CompiledMerkleProof {
-        let (leaves_path, proof) = self.take();
-        let leaves_len = leaves_path.len();
+        let (leaves_bitmap, proof) = self.take();
+        let leaves_len = leaves_bitmap.len();
         let mut data = vec![0u8; (leaves_len + proof.len()) * 32];
-        for (idx, path) in leaves_path.into_iter().enumerate() {
+        for (idx, bitmap) in leaves_bitmap.into_iter().enumerate() {
             let offset = idx * 32;
-            data[offset..offset + 32].copy_from_slice(path.as_slice());
+            data[offset..offset + 32].copy_from_slice(bitmap.as_slice());
         }
         for (idx, sibling_node_hash) in proof.into_iter().enumerate() {
             let offset = (leaves_len + idx) * 32;
@@ -76,47 +82,49 @@ impl MerkleProof {
         // sort leaves
         leaves.sort_unstable_by_key(|(k, _v)| *k);
 
-        let (leaves_path, proof) = self.take();
+        let (leaves_bitmap, proof) = self.take();
 
         let mut proof_index = 0;
-        // (path_index, key, node_hash)
+        // (bitmap_index, key, node_hash)
         let mut current_nodes: Vec<(usize, H256, H256)> = leaves
             .into_iter()
             .enumerate()
-            .map(|(path_idx, (key, value))| (path_idx, key, hash_leaf::<H>(&key, &value)))
+            .map(|(bitmap_idx, (key, value))| (bitmap_idx, key, hash_leaf::<H>(&key, &value)))
             .collect();
         let mut next_nodes: Vec<(usize, H256, H256)> = Default::default();
         for height in 0..=core::u8::MAX {
             let mut key_idx = 0;
             while key_idx < current_nodes.len() {
-                let (path_idx_a, key_a, node_a) = current_nodes[key_idx];
+                let (bitmap_idx_a, key_a, node_a) = current_nodes[key_idx];
                 let parent_key_a = key_a.parent_path(height);
 
                 let mut non_sibling_nodes = Vec::with_capacity(2);
                 if key_idx + 1 < current_nodes.len() {
-                    let (path_idx_b, key_b, node_b) = current_nodes[key_idx + 1];
+                    let (bitmap_idx_b, key_b, node_b) = current_nodes[key_idx + 1];
                     let parent_key_b = key_b.parent_path(height);
                     if parent_key_a == parent_key_b {
+                        // key_a and key_b are siblings, just merge them
                         let parent_node = merge::<H>(height, &parent_key_a, &node_a, &node_b);
-                        next_nodes.push((path_idx_a, key_a, parent_node));
+                        next_nodes.push((bitmap_idx_a, key_a, parent_node));
                         key_idx += 2;
                     } else {
-                        non_sibling_nodes.push((path_idx_a, key_a, node_a, parent_key_a));
+                        non_sibling_nodes.push((bitmap_idx_a, key_a, node_a, parent_key_a));
                         if key_idx + 2 == current_nodes.len() {
-                            non_sibling_nodes.push((path_idx_b, key_b, node_b, parent_key_b));
+                            // key_a and key_b are not siblings, and we reach the end of current height
+                            non_sibling_nodes.push((bitmap_idx_b, key_b, node_b, parent_key_b));
                         }
                     }
                 } else {
-                    non_sibling_nodes.push((path_idx_a, key_a, node_a, parent_key_a));
+                    non_sibling_nodes.push((bitmap_idx_a, key_a, node_a, parent_key_a));
                 }
 
-                for (path_idx, current_key, current_node, parent_key) in
+                for (bitmap_idx, current_key, current_node, parent_key) in
                     non_sibling_nodes.into_iter()
                 {
-                    let path = leaves_path[path_idx];
-                    let none_zero_sibling = path.get_bit(height);
+                    let bitmap = leaves_bitmap[bitmap_idx];
+                    let non_zero_sibling = bitmap.get_bit(height);
                     let is_right = current_key.is_right(height);
-                    let (left, right) = if none_zero_sibling {
+                    let (left, right) = if non_zero_sibling {
                         if proof_index == proof.len() {
                             return Err(Error::CorruptedProof);
                         }
@@ -133,7 +141,7 @@ impl MerkleProof {
                         (current_node, H256::zero())
                     };
                     let node_hash = merge::<H>(height, &parent_key, &left, &right);
-                    next_nodes.push((path_idx, current_key, node_hash));
+                    next_nodes.push((bitmap_idx, current_key, node_hash));
                     key_idx += 1;
                 }
             }
@@ -163,7 +171,7 @@ impl MerkleProof {
     }
 }
 
-/// An structure optimized for verify merkle proof
+/// An structure for verify merkle proof by raw binary
 #[derive(Debug, Clone)]
 pub struct CompiledMerkleProof(pub Vec<u8>);
 
@@ -178,19 +186,19 @@ impl CompiledMerkleProof {
 
         let sibling_node_size = self.0.len() / 32 - leaves.len();
         let mut data = [0u8; 32];
-        let mut leaves_path = Vec::with_capacity(leaves.len());
+        let mut leaves_bitmap = Vec::with_capacity(leaves.len());
         let mut proof = Vec::with_capacity(sibling_node_size);
         for idx in 0..leaves.len() {
             let offset = idx * 32;
             data.copy_from_slice(&self.0[offset..offset + 32]);
-            leaves_path.push(H256::from(data));
+            leaves_bitmap.push(H256::from(data));
         }
         for idx in 0..sibling_node_size {
             let offset = (idx + leaves.len()) * 32;
             data.copy_from_slice(&self.0[offset..offset + 32]);
             proof.push(H256::from(data));
         }
-        MerkleProof::new(leaves_path, proof).compute_root::<H>(leaves)
+        MerkleProof::new(leaves_bitmap, proof).compute_root::<H>(leaves)
     }
 
     pub fn verify<H: Hasher + Default>(

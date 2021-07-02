@@ -148,10 +148,10 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
         // sort keys
         keys.sort_unstable();
 
-        // Collect leaf paths
-        let mut leaves_path: Vec<H256> = Default::default();
+        // Collect leaf bitmaps
+        let mut leaves_bitmap: Vec<H256> = Default::default();
         for current_key in &keys {
-            let mut path = H256::zero();
+            let mut bitmap = H256::zero();
             for height in 0..=core::u8::MAX {
                 let parent_key = current_key.parent_path(height);
                 let parent_branch_key = BranchKey::new(height, parent_key);
@@ -162,13 +162,13 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
                         parent_branch.right
                     };
                     if !sibling.is_zero() {
-                        path.set_bit(height);
+                        bitmap.set_bit(height);
                     }
                 } else {
                     // The key is not in the tree (support non-inclusion proof)
                 }
             }
-            leaves_path.push(path);
+            leaves_bitmap.push(bitmap);
         }
 
         // Collect sibling node hashes
@@ -187,11 +187,13 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
                     let key_b = current_keys[key_idx + 1];
                     let parent_key_b = key_b.parent_path(height);
                     if parent_key_a == parent_key_b {
+                        // key_a and key_b are siblings
                         next_keys.push(key_a);
                         key_idx += 2;
                     } else {
                         non_sibling_keys.push((key_a, parent_key_a));
                         if key_idx + 2 == current_keys.len() {
+                            // key_a and key_b are not siblings, and we reach the end of current height
                             non_sibling_keys.push((key_b, parent_key_b));
                         }
                     }
@@ -219,6 +221,6 @@ impl<H: Hasher + Default, V: Value, S: Store<V>> SparseMerkleTree<H, V, S> {
             }
             current_keys = core::mem::take(&mut next_keys);
         }
-        Ok(MerkleProof::new(leaves_path, proof))
+        Ok(MerkleProof::new(leaves_bitmap, proof))
     }
 }
