@@ -1,7 +1,7 @@
 # Sparse merkle tree
 
-[![Crates.io](https://img.shields.io/crates/v/sparse-merkle-tree.svg)](https://crates.io/crates/sparse-merkle-tree)
-[Docs](https://docs.rs/sparse-merkle-tree)
+[![Crates.io](https://img.shields.io/crates/v/restricted-sparse-merkle-tree.svg)](https://crates.io/crates/restricted-sparse-merkle-tree)
+[Docs](https://docs.rs/restricted-sparse-merkle-tree)
 
 An optimized sparse merkle tree.
 
@@ -11,13 +11,19 @@ An optimized sparse merkle tree.
 
 Features:
 
-* Multi-leaves existence / non-existence merkle proof
+* Multi-leaves membership merkle proof
 * Customizable hash function
 * Rust `no_std` support
 
 This article describes algorithm of this data structure [An optimized compacted sparse merkle tree](https://justjjy.com/An-optimized-compact-sparse-merkle-tree)
 
 **Notice** this library is not stabled yet. The API and the format of the proof may be changed in the future. Make sure you know what you are doing before using this library.
+
+## Known issues
+
+This library do not support **non-membership** proving. We take some aggressive optimizing methods which do not works well with the non-membership proving feature.
+
+Please check this library for [non-membership proving sparse merkle tree](https://github.com/nervosnetwork/sparse-merkle-tree).
 
 ## Construction
 
