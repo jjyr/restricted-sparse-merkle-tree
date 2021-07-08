@@ -4,7 +4,7 @@ use crate::{
     merge::{hash_leaf, merge},
     traits::Hasher,
     vec::Vec,
-    H256,
+    H256, MAX_STACK_SIZE,
 };
 
 type Range = core::ops::Range<usize>;
@@ -378,6 +378,7 @@ impl CompiledMerkleProof {
                 }
                 _ => return Err(Error::InvalidCode(code)),
             }
+            debug_assert!(stack.len() <= MAX_STACK_SIZE);
         }
         if stack.len() != 1 {
             return Err(Error::CorruptedStack);
